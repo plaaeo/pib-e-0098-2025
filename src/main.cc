@@ -3,13 +3,14 @@
 #include <cstdint>
 #include <esp_task_wdt.h>
 #include <freertos/task.h>
+#include <esp_wifi.h>
 
 #include "gateway.hh"
 #include "sensors.hh"
 
 enum {
-    //< Quantidade de leituras a cada transmissão LoRa.
-    READINGS_PER_MESSAGE = 10,
+    //< Quantidade de segundos para dormir entre leituras.
+    SLEEP_SECONDS = 10,
 };
 
 /**
@@ -32,11 +33,6 @@ static_assert(BYTE_ORDER == LITTLE_ENDIAN);
 void task_sensor() {
     constexpr auto TAG = "sens";
 
-    enum {
-        //< Quantidade de segundos para dormir entre leituras.
-        SLEEP_SECONDS = 5,
-    };
-
     // Configurar ESP para acordar do sono leve em `SLEEP_SECONDS` segundos.
     ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(SLEEP_SECONDS * 1000000UL));
 
@@ -51,24 +47,31 @@ void task_sensor() {
     // Fazer o setup do gateway
     gw::setup();
 
+    auto prevTime = millis();
+
     // Iniciar coleta
     while (true) {
         // Atualizar última leitura e inserí-la no buffer.
         auto latest = g_sens.ler();
         
+        ESP_LOGI(TAG, "%f V in pH;", sens::read_volts(g_sens.ads, g_sens.ph.channel));
         ESP_LOGI(TAG, "%f C; %f ppm; %f pH;", latest.temperature, latest.tds, latest.ph);
 
         // Enviar última leitura diretamente para o Firebase
         gw::send_reading(latest);
-        
+    
         // Iniciar sono leve
-        ESP_ERROR_CHECK(esp_light_sleep_start());
+        // ESP_ERROR_CHECK(esp_light_sleep_start());
+        
+        while ((millis() - prevTime) < (SLEEP_SECONDS * 1000)) { }
+        prevTime = millis();
     }
 
     ESP_LOGE(TAG, "Execução antingiu código inalcançável.");
     abort();
 }
 
+//< Função `main` do protótipo
 extern "C" void app_main(void) {
     initArduino();
     esp_task_wdt_init(30, true);

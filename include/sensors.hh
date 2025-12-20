@@ -4,16 +4,24 @@
 
 /**
  * @todo Separar constantes de calibração em variáveis do EEPROM
- * @todo 
  */
 namespace sens {
     using ADS = Adafruit_ADS1115;
 
-    enum : std::uint8_t { NULL_CHANNEL = 255 };
+    enum : std::uint8_t {
+        NULL_CHANNEL = 255,
 
-    /**
-     * @brief Calcula a tensão no canal especificado do ADS1115.
-     */
+        //< Canal do ADS conectado ao sensor de temperatura (A0).
+        ADS_CHANNEL_TEMPERATURE = 0,
+
+        //< Canal do ADS conectado ao sensor de pH (A1).
+        ADS_CHANNEL_PH = 1,
+
+        //< Canal do ADS conectado ao sensor de TDS (A2).
+        ADS_CHANNEL_TDS = 2,
+    };
+
+    //< Calcula a tensão no canal especificado do ADS1115.
     float read_volts(ADS& ads, std::uint8_t channel) {
         auto aIn = ads.readADC_SingleEnded(channel);
         return ads.computeVolts(aIn);
@@ -25,12 +33,14 @@ namespace sens {
         
         //< Valor de calibração.
         double offset = 21.34;
-
+        
         /**
          * @brief Coleta o pH de um sensor PH-4502C, ajustado por um cálculo
          * de calibração.
          */
         float ler(ADS &ads) {
+            // NOTE: offset=21.25 deve resultar em 7. No pH 7, a tensão deve ser 2.5, logo:
+            // 21.25 - (5.7 * 2.5) = 7
             return offset - (5.70 * read_volts(ads, channel));
         }
     };
@@ -88,30 +98,15 @@ namespace sens {
         }
     };
 
-    /**
-     * @brief Representa a leitura atual dos sensores ativos.
-     */
+    //< Representa uma leitura atual dos sensores ativos.
     struct reading_t {
         float temperature;
         float tds;
         float ph;
     };
 
-    /**
-     * @brief Gerencia todos os sensores disponíveis, produzindo `sens::reading_t`.
-     */
+    //< Gerencia todos os sensores disponíveis, produzindo `sens::reading_t`.
     struct reader {
-    public:
-        enum {
-            //< Canal do ADS conectado ao sensor de temperatura.
-            ADS_CHANNEL_TEMPERATURE = 0,
-
-            //< Canal do ADS conectado ao sensor de pH.
-            ADS_CHANNEL_PH = 1,
-
-            //< Canal do ADS conectado ao sensor de TDS.
-            ADS_CHANNEL_TDS = 2,
-        };
     public:
         //< A interface de leitura do ADS1115.
         Adafruit_ADS1115 ads;
@@ -125,9 +120,7 @@ namespace sens {
         //< Leitor do sensor de temperatura utilizado em laboratório.
         ntc10k temperature;
     public:
-        /**
-         * @brief Inicializa o leitor com uma instância de `TwoWire`.
-         */
+        //< Inicializa o leitor com uma instância de `TwoWire`.
         explicit reader(TwoWire& wire) {
             temperature.channel = ADS_CHANNEL_TEMPERATURE;
             tds.channel = ADS_CHANNEL_TDS;
@@ -139,9 +132,7 @@ namespace sens {
             };
         }
 
-        /**
-         * @returns Uma leitura atual de todos os sensores.
-         */
+        //< Retorna uma leitura atual de todos os sensores.
         reading_t ler() {
             reading_t reading;
             reading.temperature = temperature.ler(ads);

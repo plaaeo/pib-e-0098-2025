@@ -5,7 +5,6 @@ namespace lora {
     SPIClass g_spi;
     SX1276 g_radio = new Module(LORA_CS, LORA_DIO0, LORA_RST, GPIO_NUM_NC, g_spi);
 
-
     /**
      * @brief Inicializa o radio LoRa.
      */
@@ -27,5 +26,4 @@ namespace lora {
             abort();
         }
     }
-
 }
