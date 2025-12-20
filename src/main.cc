@@ -10,7 +10,7 @@
 
 enum {
     //< Quantidade de segundos para dormir entre leituras.
-    SLEEP_SECONDS = 10,
+    SLEEP_SECONDS = 20,
 };
 
 /**
@@ -58,7 +58,7 @@ void task_sensor() {
         ESP_LOGI(TAG, "%f C; %f ppm; %f pH;", latest.temperature, latest.tds, latest.ph);
 
         // Enviar última leitura diretamente para o Firebase
-        gw::send_reading(latest);
+        gw::send_reading_firestore(latest);
     
         // Iniciar sono leve
         // ESP_ERROR_CHECK(esp_light_sleep_start());
