@@ -1,13 +1,12 @@
 
 #if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
-#include <WiFi.h>
+#   include <WiFi.h>
 #elif defined(ESP8266)
-#include <ESP8266WiFi.h>
+#   include <ESP8266WiFi.h>
 #endif
 
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
-#include <addons/RTDBHelper.h>
 
 #include "sensors.hh"
 
@@ -76,9 +75,6 @@ namespace gw {
         ESP_LOGI(TAG, "NTP configured at %s", getCurrentTimestamp().c_str());
 
         ESP_LOGI(TAG, "Firebase Client v" FIREBASE_CLIENT_VERSION);
-
-        /* Assign the RTDB URL (required) */
-        config.database_url = FIREBASE_HOST;
         
         /* Configure service account credentials (from 'secret.hh') */
         config.service_account.data.project_id = FIREBASE_PROJECT_ID;
@@ -93,7 +89,7 @@ namespace gw {
         // Since Firebase v4.4.x, BearSSL engine was used, the SSL buffer need to be set.
         // Large data transmission may require larger RX buffer, otherwise connection issue or data read time out can be occurred.
         fbData.setBSSLBufferSize(2048 /* Rx buffer size in bytes from 512 - 16384 */, 1024 /* Tx buffer size in bytes from 512 - 16384 */);
-        Firebase.begin(&config, &auth);
+        Firebase.begin(&config, nullptr);
 
         // Comment or pass false value when WiFi reconnection will control by your code or third party library e.g. WiFiManager
         Firebase.reconnectNetwork(true);
