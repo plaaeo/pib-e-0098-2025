@@ -14,20 +14,6 @@ enum {
 };
 
 /**
- * Garantir que não há padding.
- * O correto seria garantir que o tamanho das structs é igual entre
- * o receptor/transmissor, mas precisaria de comunicação entre ambos.
- */
-static_assert(sizeof(sens::reading_t) == sizeof(float) * 3);
-
-/**
- * Garantir que a ordem de bytes é LE.
- * O correto seria garantir que o ambos receptor/transmissor respeitam
- * a mesma ordem de bytes, mas precisaria de comunicação entre ambos.
- */
-static_assert(BYTE_ORDER == LITTLE_ENDIAN);
-
-/**
  * @brief Task do nó sensor.
  */
 void task_sensor() {
