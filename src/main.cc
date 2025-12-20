@@ -10,7 +10,7 @@
 
 enum {
     //< Quantidade de segundos para dormir entre leituras.
-    SLEEP_SECONDS = 20,
+    SLEEP_SECONDS = 10,
 };
 
 /**

@@ -9,7 +9,7 @@ O repositório contém um projeto [Platform.IO](https://platformio.org/) utiliza
 iots-base/
 ├── include/
 │   ├── gateway.hh      # código de upload para o Firestore, adaptado do gateway
-│   ├── lora.hh         # código de inicialização temporário envolvendo LoRa
+│   ├── lora.hh         # código de inicialização LoRa temporário (não utilizado!!)
 │   ├── secret.hh       # cabeçalho com chaves de api, senhas de wifi, etc.
 │   └── sensors.hh      # implementação dos sensores, coleta e valores de calibração
 ├── src/
