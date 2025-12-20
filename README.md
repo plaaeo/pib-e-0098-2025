@@ -3,6 +3,30 @@ Uma codebase desenvolvida para realizar atividades envolvendo microcontroladores
 
 O repositório contém um projeto [Platform.IO](https://platformio.org/) utilizando o framework **Arduino** como componente do **ESP-IDF**, permitindo a compatibilidade com bibliotecas desenvolvidas para **Arduino**, porém garantindo a flexibilidade do **ESP-IDF**.
 
+## Estrutura do projeto
+
+```
+iots-base/
+├── include/
+│   ├── gateway.hh      # código de upload para o Firestore, adaptado do gateway
+│   ├── lora.hh         # código de inicialização temporário envolvendo LoRa
+│   ├── secret.hh       # cabeçalho com chaves de api, senhas de wifi, etc.
+│   └── sensors.hh      # implementação dos sensores, coleta e valores de calibração
+├── src/
+│   ├── CMakeLists.txt
+│   └── main.cc         # código principal do projeto
+├── test/               # diretório para implementação de testes unitários
+│   └── README
+├── .gitignore
+├── CMakeLists.txt
+├── partitions_8MB.csv
+├── platformio.ini      # código de configuração do platform.io
+├── README.md           # este arquivo!
+└── sdkconfig.defaults  # configuração do esp-idf usada para todos os ambientes
+```
+
+Para modificar os **valores de calibração dos sensores**, modifique `include/sensors.hh`.
+
 ## Platform.IO
 
 O Platform.IO é uma ferramenta para desenvolvimento de aplicações para sistemas embarcados, suportando múltiplos frameworks, arquiteturas e plataformas.

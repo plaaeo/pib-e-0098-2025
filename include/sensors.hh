@@ -9,8 +9,6 @@ namespace sens {
     using ADS = Adafruit_ADS1115;
 
     enum : std::uint8_t {
-        NULL_CHANNEL = 255,
-
         //< Canal do ADS conectado ao sensor de temperatura (A0).
         ADS_CHANNEL_TEMPERATURE = 0,
 
@@ -29,7 +27,7 @@ namespace sens {
 
     struct ph4502c {
         //< Canal do ADS1115 conectado ao sensor.
-        std::uint8_t channel = NULL_CHANNEL;
+        std::uint8_t channel = ADS_CHANNEL_PH;
         
         //< Valor de calibração.
         double offset = 21.34;
@@ -47,7 +45,7 @@ namespace sens {
 
     struct dfrobottds {
         //< Canal do ADS1115 conectado ao sensor.
-        std::uint8_t channel = NULL_CHANNEL;
+        std::uint8_t channel = ADS_CHANNEL_TDS;
         
         //< Valor de calibração.
         double k = 0.7;
@@ -73,7 +71,7 @@ namespace sens {
 
     struct ntc10k {
         //< Canal do ADS1115 conectado ao sensor.
-        std::uint8_t channel = NULL_CHANNEL;
+        std::uint8_t channel = ADS_CHANNEL_TEMPERATURE;
         
         //< Valores de calibração.
         double offset = 0;
@@ -122,10 +120,6 @@ namespace sens {
     public:
         //< Inicializa o leitor com uma instância de `TwoWire`.
         explicit reader(TwoWire& wire) {
-            temperature.channel = ADS_CHANNEL_TEMPERATURE;
-            tds.channel = ADS_CHANNEL_TDS;
-            ph.channel = ADS_CHANNEL_PH;
-
             if (!ads.begin(ADS1X15_ADDRESS, &wire)) {
                 ESP_LOGE("sens", "Falha ao inicializar o ADS1115.");
                 abort();
