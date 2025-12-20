@@ -1,0 +1,8 @@
+#define WIFI_SSID "***"
+#define WIFI_PASSWORD "***"
+#define FIREBASE_HOST "***"
+#define FIREBASE_PROJECT_ID "***"
+#define FIREBASE_PRIVATE_KEY_ID "***"
+#define FIREBASE_PRIVATE_KEY "***"
+#define FIREBASE_CLIENT_EMAIL "***"
+#define FIREBASE_CLIENT_ID "***"
