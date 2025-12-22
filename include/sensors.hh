@@ -55,6 +55,13 @@ namespace sens {
          * e converte-a para TDS, em ppm, compensando pela temperatura.
          */
         float ler(ADS &ads, float temperature_c) {
+            /**
+             * TODO: Calibrar com valores medidos em laboratório
+             * - No ar: de 0.003V, 0.000938V, 0.00075V (21.9degC)
+             * - Água destilada: de 0.009V, 0.008063V, 0.017250V (18.5degC)
+             * - Solução 84uS/cm: de 0.15075V, 0.151313V, 0.133125V
+             * - Solução 1413uS/cm: de 1.936687V, 19.41375V, 1.998V, 2.037V
+             */
             float V = read_volts(ads, channel);
 
             // Medir condutividade elétrica
