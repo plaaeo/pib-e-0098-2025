@@ -96,7 +96,7 @@ namespace gw {
     }
 
     //< Envia uma unica `sens::reading_t` para o Firestore.
-    void send_reading_firestore(const sens::reading_t& reading) {
+    void send_reading_firestore(const sens::Reading& reading) {
         auto timestamp = getCurrentTimestamp();
 
         // Aguardar o Firebase estar pronto (?)

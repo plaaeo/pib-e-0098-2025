@@ -1,7 +1,25 @@
 #include <Arduino.h>
 #include <RadioLib.h>
 
+#include "sensors.hh"
+
 namespace lora {
+    enum Protocol {
+        EXPERIMENTAL
+    };
+
+    /**
+     * @brief Inicializa o estado global do serviço LoRa.
+     * @param radio O radiotransmissor que será utilizado. Apenas um radiotransmissor pode
+     * ser utilizado por vez. O radiotransmissor deve ser inicializado antes da chamada desta
+     * função utilizando a respectiva função `begin(...)` do módulo.
+     * @param mode O protocolo que será utilizado na rede.
+     */
+    void initialize(PhysicalLayer *radio, Protocol mode);
+
+
+    void schedule(const sens::Reading& reading);
+
     SPIClass g_spi;
     SX1276 g_radio = new Module(LORA_CS, LORA_DIO0, LORA_RST, GPIO_NUM_NC, g_spi);
 

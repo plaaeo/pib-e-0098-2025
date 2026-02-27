@@ -30,7 +30,8 @@ namespace sens {
         std::uint8_t channel = ADS_CHANNEL_PH;
         
         //< Valor de calibração.
-        double offset = 21.34;
+        double a = -5.831;
+        double b = 22.05;
         
         /**
          * @brief Coleta o pH de um sensor PH-4502C, ajustado por um cálculo
@@ -39,7 +40,7 @@ namespace sens {
         float ler(ADS &ads) {
             // NOTE: offset=21.25 deve resultar em 7. No pH 7, a tensão deve ser 2.5, logo:
             // 21.25 - (5.7 * 2.5) = 7
-            return offset - (5.70 * read_volts(ads, channel));
+            return (a * read_volts(ads, channel)) + b;
         }
     };
 
@@ -60,7 +61,7 @@ namespace sens {
              * - No ar: de 0.003V, 0.000938V, 0.00075V (21.9degC)
              * - Água destilada: de 0.009V, 0.008063V, 0.017250V (18.5degC)
              * - Solução 84uS/cm: de 0.15075V, 0.151313V, 0.133125V
-             * - Solução 1413uS/cm: de 1.936687V, 19.41375V, 1.998V, 2.037V
+             * - Solução 1413uS/cm: de 1.936687V, 1.941375V, 1.998V, 2.037V
              */
             float V = read_volts(ads, channel);
 
@@ -72,7 +73,7 @@ namespace sens {
             
             // Compensar com a temperatura
             double tc = 1.0 + 0.02 * (temperature_c - 25.0);
-            return (ec / tc) * 0.5;
+            return ec / tc;
         }
     };
 
@@ -104,7 +105,7 @@ namespace sens {
     };
 
     //< Representa uma leitura atual dos sensores ativos.
-    struct reading_t {
+    struct Reading {
         float temperature;
         float tds;
         float ph;
@@ -134,8 +135,8 @@ namespace sens {
         }
 
         //< Retorna uma leitura atual de todos os sensores.
-        reading_t ler() {
-            reading_t reading;
+        Reading ler() {
+            Reading reading;
             reading.temperature = temperature.ler(ads);
             reading.tds = tds.ler(ads, reading.temperature);
             reading.ph = ph.ler(ads);
