@@ -6,9 +6,9 @@
 namespace lora {
     class Protocol {
     protected:
-        PhysicalLayer *m_Radio;
+        PhysicalLayer* m_Phys;
         
-        Protocol(PhysicalLayer *radio) : m_Radio(radio) { };
+        Protocol(PhysicalLayer *phys) : m_Phys(phys) { };
 
     public:
         /**

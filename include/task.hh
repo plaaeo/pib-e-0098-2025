@@ -1,3 +1,4 @@
+#pragma once
 #include <cstdint>
 #include <freertos/task.h>
 
@@ -43,8 +44,10 @@ namespace task {
         
     protected:
         TaskHandle_t m_Handle;
-
     private:
+        StaticTask_t m_Task;
+        StackType_t m_Stack[4096];
+
         Task(Task&&) = delete;
         Task(const Task&) = delete;
         Task& operator=(Task&&) = delete;

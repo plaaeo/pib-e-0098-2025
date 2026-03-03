@@ -20,10 +20,7 @@ namespace sens {
     };
 
     //< Calcula a tensão no canal especificado do ADS1115.
-    float read_volts(ADS& ads, std::uint8_t channel) {
-        auto aIn = ads.readADC_SingleEnded(channel);
-        return ads.computeVolts(aIn);
-    }
+    float read_volts(ADS& ads, std::uint8_t channel);
 
     struct ph4502c {
         //< Canal do ADS1115 conectado ao sensor.

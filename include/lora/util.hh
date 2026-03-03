@@ -30,4 +30,26 @@ namespace lora {
 
     constexpr static uint32_t NOTIFICATION_IRQ = 1 << 0;
     constexpr static uint32_t NOTIFICATION_KILL = 1 << 1;
+    constexpr static uint32_t NOTIFICATION_TIMER = 1 << 2;
+
+    /**
+     * @brief Uma estrutura utilitária para detectar motivos de notificação.
+     */
+    struct Notification {
+        uint32_t irq : 1;
+        uint32_t timer : 1;
+    };
+
+
+    /**
+     * @brief Uma estrutura com todos os parâmetros configuráveis genericamente 
+     * da PHY LoRa.
+     */
+    struct Parameters {
+        float freq_mhz;
+        uint8_t power_db;
+        LoRaRate_t dr;
+        uint16_t preambleLength;
+        uint8_t syncWord;
+    };
 }

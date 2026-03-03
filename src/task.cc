@@ -18,15 +18,16 @@ namespace task {
     };
 
     Task::Task(const char *name, uint32_t priority) {
-        xTaskCreate(
+        m_Handle = xTaskCreateStatic(
             [](void* self) {
                 return static_cast<Task*>(self)->main();
             },
-            name,       // Nome da task, usado apenas para debugging.
-            4096,       // Profundidade da pilha (4096 bytes).
-            this,       // Primeiro argumento da task.
-            0,          // Prioridade da task (nenhuma).
-            &m_Handle   // Ponteiro para o handle da task criada.
+            name,                                   // Nome da task, usado apenas para debugging.
+            sizeof(m_Stack) / sizeof(StackType_t),  // Profundidade da pilha (4096 bytes).
+            this,                                   // Primeiro argumento da task.
+            priority,                               // Prioridade da task.
+            m_Stack,
+            &m_Task
         );
     }
 

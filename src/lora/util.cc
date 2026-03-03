@@ -11,16 +11,16 @@ namespace lora {
         auto flags = radio->getIrqFlags();
 
         return (IRQFields) {
-            .tx_done            = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_TX_DONE)),
-            .rx_done            = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_RX_DONE)),
-            .preamble_detected  = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_PREAMBLE_DETECTED)),
-            .sync_word_valid    = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_SYNC_WORD_VALID)),
-            .header_valid       = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_HEADER_VALID)),
-            .header_err         = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_HEADER_ERR)),
-            .crc_err            = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_CRC_ERR)),
-            .cad_done           = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_CAD_DONE)),
-            .cad_detected       = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_CAD_DETECTED)),
-            .timeout            = 1 == (flags & radio->getIrqMapped(RADIOLIB_IRQ_TIMEOUT)),
+            .tx_done            = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_TX_DONE)),
+            .rx_done            = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_RX_DONE)),
+            .preamble_detected  = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_PREAMBLE_DETECTED)),
+            .sync_word_valid    = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_SYNC_WORD_VALID)),
+            .header_valid       = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_HEADER_VALID)),
+            .header_err         = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_HEADER_ERR)),
+            .crc_err            = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_CRC_ERR)),
+            .cad_done           = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_CAD_DONE)),
+            .cad_detected       = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_CAD_DETECTED)),
+            .timeout            = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_TIMEOUT)),
         };
     };
 }
