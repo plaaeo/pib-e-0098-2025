@@ -68,15 +68,19 @@ namespace lora {
         
         // Criar timer para janelas de recepção
         esp_timer_create_args_t timer_cfg {
+#ifdef CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
             .callback = [] (void *arg) IRAM_ATTR {
                 // Interromper a task atual se uma de prioridade maior for acordada.
-                if (static_cast<Task *>(arg)->notify_from_isr(NOTIFICATION_TIMER))
+                if (static_cast<ExperimentalProtocol *>(arg)->notify_from_isr(NOTIFICATION_TIMER))
                     portYIELD_FROM_ISR();
             },
             .arg = this,
-#ifdef CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
             .dispatch_method = ESP_TIMER_ISR,
 #else
+            .callback = [] (void *arg) {
+                static_cast<ExperimentalProtocol *>(arg)->notify(NOTIFICATION_TIMER);
+            },
+            .arg = this,
             .dispatch_method = ESP_TIMER_TASK,
 #endif
             .name = "experimental-protocol-timer",
@@ -186,7 +190,7 @@ namespace lora {
 
             if (notif.irq) {
                 flags = get_irq_flags(m_Phys);
-                
+
                 ESP_LOGD(TAG, "ExperimentalProtocol::await_phys_irq() {");
                 ESP_LOGD(TAG, "\t.tx_done = %i", flags.tx_done);
                 ESP_LOGD(TAG, "\t.rx_done = %i", flags.rx_done);
@@ -205,7 +209,7 @@ namespace lora {
                 m_Phys->clearIrq(RADIOLIB_IRQ_RX_DEFAULT_FLAGS);
             }
             
-        } while (!flags.timeout || notif.timer);
+        } while (!flags.timeout && !notif.timer);
 
         // Finalizar recepção
         m_Phys->finishReceive();
