@@ -27,7 +27,7 @@ namespace lora {
          * @param reading A leitura realizada pelo nó sensor.
          * @returns `true` se foi possível agendar a transmissão.
          */
-        bool schedule(const sens::Reading& reading) override;
+        bool schedule(const sensor::Reading& reading) override;
 
     private:
         /**

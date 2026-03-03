@@ -1,7 +1,7 @@
 #pragma once 
 #include <RadioLib.h>
 
-#include "sensors.hh"
+#include "sensor/reading.hh"
 
 namespace lora {
     class Protocol {
@@ -16,7 +16,7 @@ namespace lora {
          * @param reading A leitura realizada pelo nó sensor.
          * @returns `true` se foi possível agendar a transmissão.
          */
-        virtual bool schedule(const sens::Reading& reading) = 0;
+        virtual bool schedule(const sensor::Reading& reading) = 0;
 
         Protocol(Protocol&&) = delete;
         Protocol(const Protocol&) = delete;

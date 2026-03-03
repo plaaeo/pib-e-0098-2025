@@ -26,7 +26,7 @@ namespace lora {
      * @param reading A leitura realizada pelo nó sensor.
      * @returns `true` se foi possível agendar a transmissão.
      */
-    bool ExperimentalProtocol::schedule(const sens::Reading& reading) {
+    bool ExperimentalProtocol::schedule(const sensor::Reading& reading) {
         return false;
     };
 
