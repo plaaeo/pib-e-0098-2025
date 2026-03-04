@@ -5,11 +5,10 @@
  */
 namespace sensor {
     /**
-     * @brief Representa uma leitura recente dos sensores.
-     * @todo Adicionar tempo de leitura.
-     * @todo Adicionar campos opcionais.
+     * @brief Representa uma leitura dos sensores.
      */
     struct Reading {
+        uint32_t time;
         float temperature;
         float tds;
         float ph;

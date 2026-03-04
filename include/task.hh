@@ -3,6 +3,8 @@
 #include <freertos/task.h>
 
 namespace task {
+    constexpr auto STACK_SIZE = 4096;
+
     /**
      * @brief Interrompe a execução da task atual até receber uma notificação.
      * @returns A notificação recebida.
@@ -46,7 +48,7 @@ namespace task {
         TaskHandle_t m_Handle;
     private:
         StaticTask_t m_Task;
-        StackType_t m_Stack[4096];
+        StackType_t m_Stack[STACK_SIZE];
 
         Task(Task&&) = delete;
         Task(const Task&) = delete;

@@ -30,7 +30,6 @@ namespace lora {
         return false;
     };
 
-    
     /**
      * @brief Configura os parâmetros do radiotransmissor.
      */
@@ -172,7 +171,7 @@ namespace lora {
             .receive = {
                 .timeout = UINT32_MAX,
                 .irqFlags = RADIOLIB_IRQ_RX_DEFAULT_FLAGS,
-                .irqMask = (1UL << RADIOLIB_IRQ_RX_DONE) | (1UL << RADIOLIB_IRQ_TIMEOUT),
+                .irqMask = RADIOLIB_IRQ_RX_DEFAULT_MASK,
                 .len = 0,
             },
         };
@@ -234,7 +233,6 @@ namespace lora {
             .timer  = 0 != (notification & NOTIFICATION_TIMER),
         };
     };
-
 
     /**
      * @brief ISR que notifica a task do protocolo experimental.

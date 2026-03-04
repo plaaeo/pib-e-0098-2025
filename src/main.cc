@@ -49,6 +49,7 @@ RTC_DATA_ATTR static struct {
 
     /**
      * @brief Produz uma leitura atual de sensores a partir de uma interface de leitura analógica.
+     * @todo Implementar armazenamento de tempo.
      */
     sensor::Reading measure(sensor::AnalogInterface &iface) const noexcept {
         // Medir e calcular temperatura em graus celsius
@@ -68,6 +69,7 @@ RTC_DATA_ATTR static struct {
         );
 
         return (sensor::Reading) {
+            .time = 123456,
             .temperature = curTemperature,
             .tds = curTds,
             .ph = curPh,
