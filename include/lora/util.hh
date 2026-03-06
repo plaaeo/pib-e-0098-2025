@@ -28,6 +28,20 @@ namespace lora {
      */
     IRQFields get_irq_flags(PhysicalLayer *radio);
 
+    /**
+     * @brief Inicia uma recepção em um radiotransmissor sem bloquear a execução da task.
+     * @param radio O radiotransmissor a controlar.
+     * @param rx Determina como configurar o radiotransmissor para recepção.
+     */
+    void recv_nonblocking(PhysicalLayer *radio, ReceiveConfig_t rx);
+
+    /**
+     * @brief Inicia uma transmissão em um radiotransmissor sem bloquear a execução da task.
+     * @param radio O radiotransmissor a controlar.
+     * @param tx Determina como configurar o radiotransmissor para transmissão.
+     */
+    void send_nonblocking(PhysicalLayer *radio, TransmitConfig_t tx);
+
     constexpr static uint32_t NOTIFICATION_IRQ = 1 << 0;
     constexpr static uint32_t NOTIFICATION_KILL = 1 << 1;
     constexpr static uint32_t NOTIFICATION_TIMER = 1 << 2;

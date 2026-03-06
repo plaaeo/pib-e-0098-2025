@@ -1,4 +1,5 @@
 #include <freertos/FreeRTOS.h>
+#include <esp_log.h>
 
 #include "lora/util.hh"
 #include "lora/experimental.hh"
@@ -6,6 +7,38 @@
 namespace lora {
     constexpr static auto TAG = "proto.experimental";
     static ExperimentalProtocol *g_Instance = nullptr;
+
+    std::optional<Broadcast> Broadcast::decode(uint8_t *buffer, size_t length)  {
+        if (length != BROADCAST_SIZE)
+            return std::nullopt;
+        
+        Broadcast out;
+        out.id = buffer[0];
+        out.layer = buffer[1];
+        out.referenceTime_us = buffer[2];
+        out.referenceTime_us = (out.referenceTime_us << 8) | buffer[3];
+        out.referenceTime_us = (out.referenceTime_us << 8) | buffer[4];
+        out.referenceTime_us = (out.referenceTime_us << 8) | buffer[5];
+        return out;
+    }
+
+    bool Broadcast::encode(uint8_t *buffer, size_t length)  {
+        if (length < BROADCAST_SIZE)
+            return false;
+        
+        buffer[0] = id;
+        buffer[1] = layer;
+        buffer[2] = (referenceTime_us >> 24) & 0xFF;
+        buffer[3] = (referenceTime_us >> 16) & 0xFF;
+        buffer[4] = (referenceTime_us >> 8 ) & 0xFF;
+        buffer[5] = referenceTime_us & 0xFF;
+        return true;
+    }
+
+    ExperimentalProtocol::ExperimentalProtocol(PhysicalLayer *phys)
+        : Protocol(phys)
+        , task::Task("experimental-protocol", 2)
+    { };
 
     /**
      * @brief Cria uma instância do protocolo experimental.
@@ -58,35 +91,164 @@ namespace lora {
     }
 
     /**
+     * @brief Atualizando o estado atual do protocolo de acordo com um broadcast recebido.
+     * @returns Um pacote de broadcast para ser re-transmitido, ou `std::nullopt`
+     * caso não seja necessário.
+     */
+    std::optional<Broadcast> ExperimentalProtocol::on_recv_broadcast(const Broadcast &packet) {
+        /**
+         * @todo Adicionar lógica de salvamento de vizinhos.
+         */
+
+        // Caso seja de uma camada maior, não é necessário retransmitir.
+        if (packet.layer > m_Layer)
+            return std::nullopt;
+
+        // Atualizar fonte de referência do tempo
+        if (m_Layer == UINT8_MAX) {
+            m_NetTimer.synchronize(packet.referenceTime_us, g_Instance->m_HRTTimeAtISR_us);
+
+            ESP_LOGI(TAG, "network time is %llius (reference time was %ius)", m_NetTimer.get_time_us(), packet.referenceTime_us);
+        }
+    
+        m_Layer = packet.layer + 1;
+
+        // Retornar broadcast de resposta
+        return (Broadcast) {
+            .id = m_ID,
+            .layer = m_Layer,
+            .referenceTime_us = packet.referenceTime_us,
+        };
+    };
+
+    void ExperimentalProtocol::do_initialization_stage() {
+        uint8_t buffer[256] = { };
+        Notification notif;
+
+        m_Layer = 0xFF;
+        ESP_LOGI(TAG, "starting broadcast rx session");
+
+        esp_timer_stop(m_TimeoutTimer);
+
+        // Calcular o tempo esperado de transmissão de um broadcast para esse radio
+        int64_t expectedToA_us = m_Phys->getTimeOnAir(Broadcast::BROADCAST_SIZE);
+        ESP_LOGI(TAG, "expected time on air is %llu microseconds", expectedToA_us);
+
+        do {
+            // Iniciar recepção sem timeout
+            lora::recv_nonblocking(m_Phys, {
+                .timeout = 0,
+                .irqFlags = RADIOLIB_IRQ_RX_DEFAULT_FLAGS,
+                .irqMask = 1U << RADIOLIB_IRQ_RX_DONE,
+                .len = 0,
+            });
+            
+            notif = await(NOTIFICATION_IRQ | NOTIFICATION_TIMER);            
+            
+            auto flags = get_irq_flags(m_Phys);
+            if (!notif.irq || !flags.rx_done)
+                continue;
+            
+            // Verificar se a recepção teve sucesso
+            if (flags.crc_err || flags.header_err || flags.timeout) {
+                ESP_LOGI(TAG, "received failed broadcast");
+                continue;
+            }
+
+            // Verificar se o pacote tem o tamanho correto
+            auto length = m_Phys->getPacketLength();
+            if (length != Broadcast::BROADCAST_SIZE)
+                continue;
+
+            // Ler e decodificar broadcast
+            assert(m_Phys->readData(buffer, sizeof(buffer)) == RADIOLIB_ERR_NONE);
+            auto packet = Broadcast::decode(buffer, length);
+            if (unlikely(!packet))
+                continue;
+            
+            ESP_LOGI(TAG, "broadcast from ID %hhu, layer %hhu", packet->id, packet->layer);
+            
+            // Atualizar estado e verificar necessidade de retransmissão
+            auto response = on_recv_broadcast(*packet);
+            if (!response)
+                continue;
+             
+            // Calcular um tempo aleatório antes de re-transmitir (evita colisões)
+            uint32_t delay_ms = m_Phys->randomByte();
+            ESP_LOGI(TAG, "waiting %u milliseconds...", delay_ms);
+            vTaskDelay(delay_ms / portTICK_PERIOD_MS);
+            
+            /**
+             * Atualizar o tempo de referência no broadcast para refletir o tempo
+             * de processamento do pacote e o tempo esperado de transmissão.
+             * 
+             * Isso não garante sincronia com o próximo nó. Há um pequeno erro acumulado em cada
+             * retransmissão equivalente a:
+             * - O tempo de codificar o broadcast em um pacote;
+             * - O tempo de comunicar com o radiotransmissor o pacote a ser enviado;
+             * - O tempo de comunicar o radiotransmissor a iniciar a transmissão;
+             * - O tempo do radiotransmissor realmente iniciar a transmissão.
+             * Após a recepcão do próximo nó, ainda há um pequeno delay não deterministico de processamento
+             * necessário para o radiotransmissor conseguir demodular o pacote e corrigir erros.
+             */
+            response->referenceTime_us = static_cast<int32_t>(
+                m_NetTimer.get_time_us() + expectedToA_us
+            );
+
+            assert(response->encode(buffer, sizeof(buffer)));
+
+            // Realizar a retransmissão
+            lora::send_nonblocking(m_Phys, {
+                .data = buffer,
+                .len = Broadcast::BROADCAST_SIZE,
+                .addr = 0,
+            });
+            
+            // Aguardar fim da transmissão.
+            notif = await(NOTIFICATION_IRQ | NOTIFICATION_TIMER);
+            flags = get_irq_flags(m_Phys);
+            assert(notif.irq && flags.tx_done);
+            ESP_LOGI(TAG, "retransmitted broadcast");
+
+            // Reiniciar timeout para 8 * o delay aleatório máximo
+            esp_timer_stop(m_TimeoutTimer);
+            esp_timer_start_once(m_TimeoutTimer, UINT8_MAX * 1000U * 8U);
+        } while (!notif.timer);
+
+        esp_timer_stop(m_TimeoutTimer);
+        ESP_LOGI(TAG, "ended broadcast rx session, I'm ID %hhu at layer %hhu", m_ID, m_Layer);
+
+        assert(m_Phys->finishReceive() == RADIOLIB_ERR_NONE);
+    };
+
+    /**
      * @brief Função principal da task do protocolo experimental.
      */
     void ExperimentalProtocol::main() {
-        lora::IRQFields flags;
-        RadioModeConfig_t cfg;
-        uint8_t buffer[256] = { };
-        
-        // Criar timer para janelas de recepção
+        // Criar timer para gerenciamento manual de timeouts
         esp_timer_create_args_t timer_cfg {
-#ifdef CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
-            .callback = [] (void *arg) IRAM_ATTR {
-                // Interromper a task atual se uma de prioridade maior for acordada.
-                if (static_cast<ExperimentalProtocol *>(arg)->notify_from_isr(NOTIFICATION_TIMER))
-                    portYIELD_FROM_ISR();
-            },
-            .arg = this,
-            .dispatch_method = ESP_TIMER_ISR,
-#else
             .callback = [] (void *arg) {
-                static_cast<ExperimentalProtocol *>(arg)->notify(NOTIFICATION_TIMER);
+                auto self = static_cast<ExperimentalProtocol *>(arg);
+                self->notify(NOTIFICATION_TIMER);
             },
             .arg = this,
             .dispatch_method = ESP_TIMER_TASK,
-#endif
             .name = "experimental-protocol-timer",
-            .skip_unhandled_events = false
+            .skip_unhandled_events = false,
         };
 
-        ESP_ERROR_CHECK(esp_timer_create(&timer_cfg, &m_EspTimer));
+#ifdef CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
+        // Configurar callback especial caso timers sejam despachados por interrupts
+        timer_cfg.dispatch_method = ESP_TIMER_ISR;
+        timer_cfg.callback = [] (void *arg) IRAM_ATTR {
+            // Interromper a task atual se uma de prioridade maior for acordada.
+            auto self = static_cast<ExperimentalProtocol *>(arg);
+            if (self->notify_from_isr(NOTIFICATION_TIMER))
+                portYIELD_FROM_ISR();
+        };
+#endif
+
+        ESP_ERROR_CHECK(esp_timer_create(&timer_cfg, &m_TimeoutTimer));
 
         // Configurar ISR
         m_Phys->setPacketSentAction(ExperimentalProtocol::isr_notify_task);
@@ -105,60 +267,44 @@ namespace lora {
             .preambleLength = 8,
             .syncWord = 0xAE
         });
-        
-        cfg = (RadioModeConfig_t) {
-            .transmit = {
-                .data = (const uint8_t *) ("hello"),
-                .len = 5,
-            },
-        };
 
-        m_Phys->stageMode(RADIOLIB_RADIO_MODE_TX, &cfg);
-        m_Phys->launchMode();
+        // Transmitir mensagem falsa de início de broadcast
+        lora::send_nonblocking(m_Phys, {
+            .data = (const uint8_t *) "\x00\x00\x00\x00\x00\x00",
+            .len = 6,
+            .addr = 0,
+        });
 
-        ESP_LOGI(TAG, "launched TX mode");
+        await(NOTIFICATION_IRQ);
 
-        do {
-            await(NOTIFICATION_IRQ);
-            flags = get_irq_flags(m_Phys);
-        } while (!flags.tx_done);
+        do_initialization_stage();
 
-        // receber pacotes por 30 segundos
-        open_rx_continuous(30000);
+        auto nextTimerTime_us = 2000000LL;
 
-        /* --- rx --- */
-
-        cfg = (RadioModeConfig_t) {
-            .receive = {
-                .timeout = 0,
-                .irqFlags = RADIOLIB_IRQ_RX_DEFAULT_FLAGS,
-                .irqMask = RADIOLIB_IRQ_RX_DEFAULT_MASK,
-                .len = 0,
-            },
-        };
-
-        // Iniciar recepção contínua (sem timeout)
-        m_Phys->stageMode(RADIOLIB_RADIO_MODE_RX, &cfg);
-        m_Phys->launchMode();
-        ESP_LOGI(TAG, "launched RX mode");
-
+        uint32_t ledState = 0;
         for (;;) {
-            await(NOTIFICATION_IRQ);
-            flags = get_irq_flags(m_Phys);
+            nextTimerTime_us += 1000000LL;
+            esp_timer_start_once(
+                m_TimeoutTimer,
+                nextTimerTime_us - m_NetTimer.get_time_us()
+            );
 
-            if (flags.rx_done) {
-                if (!flags.crc_err && !flags.header_err && !flags.timeout) {
-                    auto length = m_Phys->getPacketLength();
-                    assert(length < 256);
-                    m_Phys->readData(buffer, length);
-                    buffer[length] = '\0';
-                    auto rssi = m_Phys->getRSSI();
-                    auto snr = m_Phys->getSNR();
-                    ESP_LOGI(TAG, "\treceived %u (%s) (rssi=%f; snr=%f)", length, (char *)buffer, rssi, snr);
-                }
+            if constexpr (STATUS_LED != GPIO_NUM_NC) {
+                ledState = (ledState > 0) ? 0 : 1;
+                gpio_hold_dis(STATUS_LED);
+                gpio_set_level(STATUS_LED, ledState);
+                gpio_hold_en(STATUS_LED);
             }
-
-            m_Phys->clearIrq(RADIOLIB_IRQ_RX_DEFAULT_FLAGS);
+            
+            await(NOTIFICATION_TIMER);
+            auto time_us = m_NetTimer.get_time_us();
+            auto drift_us = time_us - nextTimerTime_us;
+            char driftSign = '+';
+            if (drift_us < 0) {
+                driftSign = '-';
+                drift_us = -drift_us;
+            }
+            ESP_LOGI(TAG, "current time is: %lli.%06llis after broadcast (drifted %c%lli.%06lli)", time_us / 1000000, time_us % 1000000LL, driftSign, drift_us / 1000000, drift_us % 1000000LL);
         }
     }
 
@@ -177,7 +323,8 @@ namespace lora {
         };
 
         ESP_LOGI(TAG, "opening rx window for %ums", window_ms);
-        ESP_ERROR_CHECK(esp_timer_start_once(m_EspTimer, window_ms * 1000));
+        esp_timer_stop(m_TimeoutTimer);
+        esp_timer_start_once(m_TimeoutTimer, window_ms * 1000);
 
         do {
             // Iniciar recepção contínua
@@ -216,6 +363,12 @@ namespace lora {
     }
 
     Notification ExperimentalProtocol::await(uint32_t mask) {
+#ifndef NDEBUG
+        // Sincronizar logs caso seja uma build de debug
+        fflush(stdout);
+        fsync(fileno(stdout));
+#endif
+
         uint32_t notification = 0;
         
         do {
@@ -240,6 +393,9 @@ namespace lora {
     void IRAM_ATTR ExperimentalProtocol::isr_notify_task() {
         if (g_Instance == NULL)
             return;
+
+        // É seguro chamar `esp_timer_get_time` em um ISR
+        g_Instance->m_HRTTimeAtISR_us = esp_timer_get_time();
 
         // Interromper a task atual se uma de prioridade maior for acordada.
         if (g_Instance->notify_from_isr(NOTIFICATION_IRQ))

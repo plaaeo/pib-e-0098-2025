@@ -23,4 +23,28 @@ namespace lora {
             .timeout            = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_TIMEOUT)),
         };
     };
+
+    /**
+     * @brief Inicia uma recepção em um radiotransmissor sem bloquear a execução da task.
+     * @param radio O radiotransmissor a controlar.
+     * @param rx Determina como configurar o radiotransmissor para recepção.
+     */
+    void recv_nonblocking(PhysicalLayer *radio, ReceiveConfig_t rx) {
+        RadioModeConfig_t mode { .receive = rx };
+
+        assert(radio->stageMode(RADIOLIB_RADIO_MODE_RX, &mode) == RADIOLIB_ERR_NONE);
+        assert(radio->launchMode() == RADIOLIB_ERR_NONE);
+    }
+
+    /**
+     * @brief Inicia uma transmissão em um radiotransmissor sem bloquear a execução da task.
+     * @param radio O radiotransmissor a controlar.
+     * @param tx Determina como configurar o radiotransmissor para transmissão.
+     */
+    void send_nonblocking(PhysicalLayer *radio, TransmitConfig_t tx) {
+        RadioModeConfig_t mode { .transmit = tx };
+
+        assert(radio->stageMode(RADIOLIB_RADIO_MODE_TX, &mode) == RADIOLIB_ERR_NONE);
+        assert(radio->launchMode() == RADIOLIB_ERR_NONE);
+    }
 }

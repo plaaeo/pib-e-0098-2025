@@ -5,6 +5,7 @@
 #include <freertos/task.h>
 #include <esp_wifi.h>
 #include <esp_pm.h>
+#include <esp_log.h>
 
 #include "lora/experimental.hh"
 
@@ -104,6 +105,10 @@ void task_sensor() {
 extern "C" void app_main(void) {
     initArduino();
 
+    if constexpr (STATUS_LED != GPIO_NUM_NC) {
+        pinMode(STATUS_LED, OUTPUT);
+    }
+
     // Definir nível de logs para DEBUG após inicialização
     esp_log_level_set("*", ESP_LOG_DEBUG);
 
@@ -130,6 +135,9 @@ extern "C" void app_main(void) {
     };    
 #endif
     ESP_ERROR_CHECK(esp_pm_configure(&pm_config));
+
+    rtc_clk_32k_enable(true);
+    rtc_clk_slow_freq_set(RTC_SLOW_FREQ_32K_XTAL);
 
     esp_task_wdt_init(30, true);
     task_sensor();

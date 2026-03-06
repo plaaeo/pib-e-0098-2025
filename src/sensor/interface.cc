@@ -1,3 +1,4 @@
+#include <esp_log.h>
 #include "sensor/interface.hh"
 
 namespace sensor {

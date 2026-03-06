@@ -39,7 +39,7 @@ namespace task {
         );
     };
 
-    bool Task::notify_from_isr(uint32_t notification) {
+    bool IRAM_ATTR Task::notify_from_isr(uint32_t notification) {
         BaseType_t pxHigherPriorityTaskWoken;
         xTaskNotifyFromISR(
             m_Handle,                   // Acordar task.

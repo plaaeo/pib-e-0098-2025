@@ -42,7 +42,7 @@ namespace task {
          * @returns `true` caso uma task de prioridade mais alta tiver sido acordada.
          * Neste caso, é necessario executar `portYIELD_FROM_ISR` no fim da ISR.
          */
-        bool notify_from_isr(uint32_t notification);
+        bool IRAM_ATTR notify_from_isr(uint32_t notification);
         
     protected:
         TaskHandle_t m_Handle;
