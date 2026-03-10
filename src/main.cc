@@ -84,6 +84,12 @@ sensor::ADS1X15Interface g_ADC;
 //< Interface para envio de leituras de sensor.
 lora::Protocol *g_Proto = nullptr;
 
+RTC_DATA_ATTR lora::ExperimentalState g_State = {
+    .id = 0,
+    .layer = 0,
+    .net_time = { }
+};
+
 /**
  * @brief Task do nó sensor.
  */
@@ -98,7 +104,11 @@ void task_sensor() {
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     s_Phys.begin(915.0f);
-    g_Proto = lora::ExperimentalProtocol::create(&s_Phys);
+    s_Phys.forceLDRO(false);
+
+    g_State.id = s_Phys.randomByte();
+    
+    g_Proto = lora::ExperimentalProtocol::create(&s_Phys, g_State);
 }
 
 //< Função `main` do protótipo

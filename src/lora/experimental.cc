@@ -35,9 +35,10 @@ namespace lora {
         return true;
     }
 
-    ExperimentalProtocol::ExperimentalProtocol(PhysicalLayer *phys)
+    ExperimentalProtocol::ExperimentalProtocol(PhysicalLayer *phys, ExperimentalState &state)
         : Protocol(phys)
         , task::Task("experimental-protocol", 2)
+        , m_State(state)
     { };
 
     /**
@@ -47,10 +48,10 @@ namespace lora {
      * a qualquer momento da execução.
      * @returns A instância criada, ou `nullptr` caso já exista outra instância.
      */
-    ExperimentalProtocol *ExperimentalProtocol::create(PhysicalLayer *phys) {
+    ExperimentalProtocol *ExperimentalProtocol::create(PhysicalLayer *phys, ExperimentalState &state) {
         if (g_Instance) return nullptr;
 
-        g_Instance = new ExperimentalProtocol(phys);
+        g_Instance = new ExperimentalProtocol(phys, state);
         return g_Instance;
     };
 
@@ -64,33 +65,6 @@ namespace lora {
     };
 
     /**
-     * @brief Configura os parâmetros do radiotransmissor.
-     */
-    void ExperimentalProtocol::set_phy_parameters(Parameters params) {
-        int16_t status;
-        
-        status = m_Phys->setDataRate({ .lora = params.dr }, RADIOLIB_MODEM_LORA);
-        if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE(TAG, "failed to set datarate (%hi)", status);
-
-        status = m_Phys->setFrequency(params.freq_mhz);
-        if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE(TAG, "failed to set radio frequency (%hi)", status);
-
-        status = m_Phys->setOutputPower(params.power_db);
-        if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE(TAG, "failed to set output power (%hi)", status);
-            
-        status = m_Phys->setPreambleLength(params.preambleLength);
-        if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE(TAG, "failed to set preamble length (%hi)", status);
-
-        status = m_Phys->setSyncWord(&params.syncWord, 1);
-        if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE(TAG, "failed to set syncword (%hi)", status);
-    }
-
-    /**
      * @brief Atualizando o estado atual do protocolo de acordo com um broadcast recebido.
      * @returns Um pacote de broadcast para ser re-transmitido, ou `std::nullopt`
      * caso não seja necessário.
@@ -101,22 +75,22 @@ namespace lora {
          */
 
         // Caso seja de uma camada maior, não é necessário retransmitir.
-        if (packet.layer > m_Layer)
+        if (packet.layer > m_State.layer)
             return std::nullopt;
 
         // Atualizar fonte de referência do tempo
-        if (m_Layer == UINT8_MAX) {
-            m_NetTimer.synchronize(packet.referenceTime_us, g_Instance->m_HRTTimeAtISR_us);
+        if (m_State.layer == UINT8_MAX) {
+            m_State.net_time.synchronize(packet.referenceTime_us, g_Instance->m_HRTTimeAtISR_us);
 
-            ESP_LOGI(TAG, "network time is %llius (reference time was %ius)", m_NetTimer.get_time_us(), packet.referenceTime_us);
+            ESP_LOGI(TAG, "network time is %llius (reference time was %ius)", m_State.net_time.get_time_us(), packet.referenceTime_us);
         }
     
-        m_Layer = packet.layer + 1;
+        m_State.layer = packet.layer + 1;
 
         // Retornar broadcast de resposta
         return (Broadcast) {
-            .id = m_ID,
-            .layer = m_Layer,
+            .id = m_State.id,
+            .layer = m_State.layer,
             .referenceTime_us = packet.referenceTime_us,
         };
     };
@@ -125,10 +99,8 @@ namespace lora {
         uint8_t buffer[256] = { };
         Notification notif;
 
-        m_Layer = 0xFF;
+        m_State.layer = UINT8_MAX;
         ESP_LOGI(TAG, "starting broadcast rx session");
-
-        esp_timer_stop(m_TimeoutTimer);
 
         // Calcular o tempo esperado de transmissão de um broadcast para esse radio
         int64_t expectedToA_us = m_Phys->getTimeOnAir(Broadcast::BROADCAST_SIZE);
@@ -145,9 +117,11 @@ namespace lora {
             
             notif = await(NOTIFICATION_IRQ | NOTIFICATION_TIMER);            
             
-            auto flags = get_irq_flags(m_Phys);
-            if (!notif.irq || !flags.rx_done)
+            auto flags = lora::get_irq_flags(m_Phys);
+            if (!notif.irq || !flags.rx_done) {
+                ESP_LOGI(TAG, "interrupted without rx done");
                 continue;
+            }
             
             // Verificar se a recepção teve sucesso
             if (flags.crc_err || flags.header_err || flags.timeout) {
@@ -157,16 +131,20 @@ namespace lora {
 
             // Verificar se o pacote tem o tamanho correto
             auto length = m_Phys->getPacketLength();
-            if (length != Broadcast::BROADCAST_SIZE)
+            if (length != Broadcast::BROADCAST_SIZE) {
+                ESP_LOGI(TAG, "received broadcast with wrong length");
                 continue;
+            }
 
             // Ler e decodificar broadcast
             assert(m_Phys->readData(buffer, sizeof(buffer)) == RADIOLIB_ERR_NONE);
             auto packet = Broadcast::decode(buffer, length);
-            if (unlikely(!packet))
+            if (unlikely(!packet)) {
+                ESP_LOGI(TAG, "broadcast was invalid");
                 continue;
+            }
             
-            ESP_LOGI(TAG, "broadcast from ID %hhu, layer %hhu", packet->id, packet->layer);
+            ESP_LOGI(TAG, "broadcast from ID %hhu, layer %hhu (rrsi=%f, snr=%f)", packet->id, packet->layer, m_Phys->getRSSI(), m_Phys->getSNR());
             
             // Atualizar estado e verificar necessidade de retransmissão
             auto response = on_recv_broadcast(*packet);
@@ -192,7 +170,7 @@ namespace lora {
              * necessário para o radiotransmissor conseguir demodular o pacote e corrigir erros.
              */
             response->referenceTime_us = static_cast<int32_t>(
-                m_NetTimer.get_time_us() + expectedToA_us
+                m_State.net_time.get_time_us() + expectedToA_us
             );
 
             assert(response->encode(buffer, sizeof(buffer)));
@@ -206,8 +184,9 @@ namespace lora {
             
             // Aguardar fim da transmissão.
             notif = await(NOTIFICATION_IRQ | NOTIFICATION_TIMER);
-            flags = get_irq_flags(m_Phys);
+            flags = lora::get_irq_flags(m_Phys);
             assert(notif.irq && flags.tx_done);
+
             ESP_LOGI(TAG, "retransmitted broadcast");
 
             // Reiniciar timeout para 8 * o delay aleatório máximo
@@ -216,7 +195,7 @@ namespace lora {
         } while (!notif.timer);
 
         esp_timer_stop(m_TimeoutTimer);
-        ESP_LOGI(TAG, "ended broadcast rx session, I'm ID %hhu at layer %hhu", m_ID, m_Layer);
+        ESP_LOGI(TAG, "ended broadcast rx session, I'm ID %hhu at layer %hhu", m_State.id, m_State.layer);
 
         assert(m_Phys->finishReceive() == RADIOLIB_ERR_NONE);
     };
@@ -256,16 +235,16 @@ namespace lora {
         m_Phys->setChannelScanAction(ExperimentalProtocol::isr_notify_task);
 
         // Configurar parâmetros iniciais conhecidos padrão
-        set_phy_parameters({
+        lora::set_phy_parameters(m_Phys, {
             .freq_mhz = 915.0f,
-            .power_db = 10,
+            .power_db = 5,
             .dr = {
-                .spreadingFactor = 7,
-                .bandwidth = 125.0f,
+                .spreadingFactor = 12,
+                .bandwidth = 125.f,
                 .codingRate = 5,
             },
-            .preambleLength = 8,
-            .syncWord = 0xAE
+            .preambleLength = 12,
+            .syncWord = 0x77
         });
 
         // Transmitir mensagem falsa de início de broadcast
@@ -286,7 +265,7 @@ namespace lora {
             nextTimerTime_us += 1000000LL;
             esp_timer_start_once(
                 m_TimeoutTimer,
-                nextTimerTime_us - m_NetTimer.get_time_us()
+                nextTimerTime_us - m_State.net_time.get_time_us()
             );
 
             if constexpr (STATUS_LED != GPIO_NUM_NC) {
@@ -297,7 +276,7 @@ namespace lora {
             }
             
             await(NOTIFICATION_TIMER);
-            auto time_us = m_NetTimer.get_time_us();
+            auto time_us = m_State.net_time.get_time_us();
             auto drift_us = time_us - nextTimerTime_us;
             char driftSign = '+';
             if (drift_us < 0) {
@@ -335,7 +314,7 @@ namespace lora {
             notif = await();
 
             if (notif.irq) {
-                flags = get_irq_flags(m_Phys);
+                flags = lora::get_irq_flags(m_Phys);
 
                 ESP_LOGD(TAG, "ExperimentalProtocol::await_phys_irq() {");
                 ESP_LOGD(TAG, "\t.tx_done = %i", flags.tx_done);

@@ -38,9 +38,26 @@ namespace lora {
         bool encode(uint8_t *buffer, size_t length);
     };
 
+    struct ExperimentalState {
+        /**
+         * @brief Um identificador único deste nó sensor.
+         */
+        uint8_t id;
+
+        /**
+         * @brief O número mínimo de hops para alcançar o gateway.
+         */
+        uint8_t layer;
+        
+        /**
+         * @brief Usado para sincronizar o tempo entre os nós sensores.
+         */
+        NetworkTimer net_time;
+    };
+
     class ExperimentalProtocol : public Protocol, private task::Task {
     protected:
-        ExperimentalProtocol(PhysicalLayer *phys);
+        ExperimentalProtocol(PhysicalLayer *phys, ExperimentalState &state);
 
     public:
         /**
@@ -50,7 +67,7 @@ namespace lora {
          * a qualquer momento da execução.
          * @returns A instância criada, ou `nullptr` caso já exista outra instância.
          */
-        static ExperimentalProtocol *create(PhysicalLayer *phys);
+        static ExperimentalProtocol *create(PhysicalLayer *phys, ExperimentalState &state);
 
         /**
          * @brief Agenda a transmissão de uma leitura de sensor quando possível.
@@ -60,10 +77,6 @@ namespace lora {
         bool schedule(const sensor::Reading& reading) override;
 
     private:
-        /**
-         * @brief Configura os parâmetros do radiotransmissor.
-         */
-        void set_phy_parameters(Parameters params);
 
         /**
          * @brief Atualizando o estado atual do protocolo de acordo com um broadcast recebido.
@@ -104,21 +117,13 @@ namespace lora {
          */
         static void IRAM_ATTR isr_notify_task();
     private:
+        ExperimentalState &m_State;
+
         //< Salva o resultado de `esp_timer_get_time()` no momento do último IRQ do radio.
         int64_t m_HRTTimeAtISR_us;
 
-        //<
-        NetworkTimer m_NetTimer;
-
-        //< Um ID único que identifica este nó sensor.
-        uint8_t m_ID;
-
-        /**
-         * @brief Determina quantos hops foram necessários para que um pacote do gateway
-         * chegasse neste nó sensor.
-         */
-        uint8_t m_Layer;
-
         esp_timer_handle_t m_TimeoutTimer;
     };
+
+    
 }

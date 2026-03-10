@@ -21,12 +21,29 @@ namespace lora {
     };
 
     /**
+     * @brief Uma estrutura com todos os parâmetros configuráveis genericamente 
+     * da PHY LoRa.
+     */
+    struct Parameters {
+        float freq_mhz;
+        uint8_t power_db;
+        LoRaRate_t dr;
+        uint16_t preambleLength;
+        uint8_t syncWord;
+    };
+
+    /**
      * @brief Função utilitária usada para converter flags de IRQ do radiotransmissor
      * em um bitset com campos radio-agnósticos.
      * @param radio O radiotransmissor cujas flags devem ser lidas.
      * @todo Verificar se o compilador otimiza esta função.
      */
     IRQFields get_irq_flags(PhysicalLayer *radio);
+
+    /**
+     * @brief Configura os parâmetros LoRa do radiotransmissor.
+     */
+    void set_phy_parameters(PhysicalLayer *phys, Parameters params);
 
     /**
      * @brief Inicia uma recepção em um radiotransmissor sem bloquear a execução da task.
@@ -52,18 +69,5 @@ namespace lora {
     struct Notification {
         uint32_t irq : 1;
         uint32_t timer : 1;
-    };
-
-
-    /**
-     * @brief Uma estrutura com todos os parâmetros configuráveis genericamente 
-     * da PHY LoRa.
-     */
-    struct Parameters {
-        float freq_mhz;
-        uint8_t power_db;
-        LoRaRate_t dr;
-        uint16_t preambleLength;
-        uint8_t syncWord;
     };
 }

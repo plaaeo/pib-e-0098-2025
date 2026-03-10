@@ -1,4 +1,5 @@
 #include "lora/util.hh"
+#include <esp_log.h>
 
 namespace lora {
     /**
@@ -23,6 +24,34 @@ namespace lora {
             .timeout            = 0 != (flags & radio->getIrqMapped(1 << RADIOLIB_IRQ_TIMEOUT)),
         };
     };
+
+    /**
+     * @brief Configura os parâmetros LoRa do radiotransmissor.
+     */
+    void set_phy_parameters(PhysicalLayer *phys, Parameters params) {
+        int16_t status;
+        
+        status = phys->setDataRate({ .lora = params.dr }, RADIOLIB_MODEM_LORA);
+        if (status != RADIOLIB_ERR_NONE)
+            ESP_LOGE("lora", "failed to set datarate (%hi)", status);
+
+        status = phys->setFrequency(params.freq_mhz);
+        if (status != RADIOLIB_ERR_NONE)
+            ESP_LOGE("lora", "failed to set radio frequency (%hi)", status);
+
+        status = phys->setOutputPower(params.power_db);
+        if (status != RADIOLIB_ERR_NONE)
+            ESP_LOGE("lora", "failed to set output power (%hi)", status);
+            
+        status = phys->setPreambleLength(params.preambleLength);
+        if (status != RADIOLIB_ERR_NONE)
+            ESP_LOGE("lora", "failed to set preamble length (%hi)", status);
+
+        status = phys->setSyncWord(&params.syncWord, 1);
+        if (status != RADIOLIB_ERR_NONE)
+            ESP_LOGE("lora", "failed to set syncword (%hi)", status);
+    }
+
 
     /**
      * @brief Inicia uma recepção em um radiotransmissor sem bloquear a execução da task.

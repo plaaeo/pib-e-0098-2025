@@ -11,6 +11,8 @@ namespace lora {
         Protocol(PhysicalLayer *phys) : m_Phys(phys) { };
 
     public:
+        virtual ~Protocol() = default;
+        
         /**
          * @brief Agenda a transmissão de uma leitura de sensor quando possível.
          * @param reading A leitura realizada pelo nó sensor.
