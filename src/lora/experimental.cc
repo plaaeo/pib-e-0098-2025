@@ -80,7 +80,17 @@ namespace lora {
 
         // Atualizar fonte de referência do tempo
         if (m_State.layer == UINT8_MAX) {
-            m_State.net_time.synchronize(packet.referenceTime_us, g_Instance->m_HRTTimeAtISR_us);
+            /**
+             * Ao receber um pacote, um dos delays que contribuem à dessincronização do tempo entre os nós é
+             * um pequeno delay de (o que assumo que seja) processamento do sinal por parte do radio. Como esse
+             * delay aparenta crescer com o tempo de transmissão (ToA), é justo assumir que esteja relacionado ao
+             * tempo de um símbolo LoRa. Como uma forma de minimizar a influência desse delay na sincronização, removemos
+             * o tempo de 1 símbolo do tempo de recepção (IRQ) para aproximar o tempo em que a transmissão realmente finalizou.
+             */
+            int64_t symbolTime_us = (m_State.params.dr.spreadingFactor * 1000U) / m_State.params.dr.bandwidth;
+            auto transmissionEndTime_us = g_Instance->m_HRTTimeAtISR_us - symbolTime_us;
+
+            m_State.net_time.synchronize(packet.referenceTime_us, transmissionEndTime_us);
 
             ESP_LOGI(TAG, "network time is %llius (reference time was %ius)", m_State.net_time.get_time_us(), packet.referenceTime_us);
         }
@@ -234,8 +244,7 @@ namespace lora {
         m_Phys->setPacketReceivedAction(ExperimentalProtocol::isr_notify_task);
         m_Phys->setChannelScanAction(ExperimentalProtocol::isr_notify_task);
 
-        // Configurar parâmetros iniciais conhecidos padrão
-        lora::set_phy_parameters(m_Phys, {
+        m_State.params = {
             .freq_mhz = 915.0f,
             .power_db = 5,
             .dr = {
@@ -245,7 +254,10 @@ namespace lora {
             },
             .preambleLength = 12,
             .syncWord = 0x77
-        });
+        };
+
+        // Configurar parâmetros iniciais conhecidos padrão
+        lora::set_phy_parameters(m_Phys, m_State.params);
 
         // Transmitir mensagem falsa de início de broadcast
         lora::send_nonblocking(m_Phys, {

@@ -43,7 +43,7 @@ namespace lora {
     /**
      * @brief Configura os parâmetros LoRa do radiotransmissor.
      */
-    void set_phy_parameters(PhysicalLayer *phys, Parameters params);
+    void set_phy_parameters(PhysicalLayer *phys, const Parameters &params);
 
     /**
      * @brief Inicia uma recepção em um radiotransmissor sem bloquear a execução da task.

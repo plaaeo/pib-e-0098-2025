@@ -84,11 +84,7 @@ sensor::ADS1X15Interface g_ADC;
 //< Interface para envio de leituras de sensor.
 lora::Protocol *g_Proto = nullptr;
 
-RTC_DATA_ATTR lora::ExperimentalState g_State = {
-    .id = 0,
-    .layer = 0,
-    .net_time = { }
-};
+RTC_DATA_ATTR lora::ExperimentalState g_State = { };
 
 /**
  * @brief Task do nó sensor.

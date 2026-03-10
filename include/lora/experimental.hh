@@ -39,6 +39,8 @@ namespace lora {
     };
 
     struct ExperimentalState {
+        lora::Parameters params;
+
         /**
          * @brief Um identificador único deste nó sensor.
          */
@@ -48,7 +50,7 @@ namespace lora {
          * @brief O número mínimo de hops para alcançar o gateway.
          */
         uint8_t layer;
-        
+
         /**
          * @brief Usado para sincronizar o tempo entre os nós sensores.
          */
