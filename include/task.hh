@@ -1,6 +1,13 @@
 #pragma once
-#include <cstdint>
-#include <freertos/task.h>
+#include <stdint.h>
+#include "types.hh"
+
+#ifdef ESP32
+#   include <freertos/FreeRTOS.h>
+#   include <freertos/task.h>
+#else
+#   include <Arduino_FreeRTOS.h>
+#endif
 
 namespace task {
     constexpr auto STACK_SIZE = 4096;
@@ -42,13 +49,16 @@ namespace task {
          * @returns `true` caso uma task de prioridade mais alta tiver sido acordada.
          * Neste caso, é necessario executar `portYIELD_FROM_ISR` no fim da ISR.
          */
-        bool IRAM_ATTR notify_from_isr(uint32_t notification);
+        bool ISR_SAFE_ATTR notify_from_isr(uint32_t notification);
         
     protected:
         TaskHandle_t m_Handle;
     private:
+
+#if (configSUPPORT_STATIC_ALLOCATION == 1)
         StaticTask_t m_Task;
         StackType_t m_Stack[STACK_SIZE];
+#endif
 
         Task(Task&&) = delete;
         Task(const Task&) = delete;

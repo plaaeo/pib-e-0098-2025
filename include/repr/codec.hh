@@ -1,6 +1,6 @@
 #pragma once
-#include <cstdint>
-#include <cmath>
+#include <stdint.h>
+#include <math.h>
 
 namespace repr {
     /**
@@ -31,7 +31,7 @@ namespace repr {
         /**
          * @brief Converte um valor para sua representação comprimida.
          */
-        constexpr uint16_t compress(float value) const noexcept {
+        inline uint16_t compress(float value) const noexcept {
             if (value < min) {
                 return value < min - validity_threshold
                     ? mask()    // Filtrar valor inválido
@@ -50,7 +50,7 @@ namespace repr {
          * para sua unidade de medida original.
          * @warning Ao receber como entrada um valor inválido, retorna `NaN`.
          */
-        constexpr float decompress(uint16_t value) const noexcept {
+        inline float decompress(uint16_t value) const noexcept {
             // Retornar NaN caso seja um valor inválido.
             if (value == mask()) {
                 return NAN;

@@ -1,4 +1,4 @@
-#include <esp_log.h>
+#include "types.hh"
 #include "sensor/interface.hh"
 
 namespace sensor {
@@ -12,12 +12,7 @@ namespace sensor {
         : AnalogInterface(4)
     {}
 
-    bool ADS1X15Interface::begin(gpio_num_t sda, gpio_num_t sdl, TwoWire &wire) {
-        if (!wire.begin(sda, sdl)) {
-            ESP_LOGE("ADS1X15Interface", "failed to initialize TwoWire instance");
-            return false;
-        }
-
+    bool ADS1X15Interface::begin(TwoWire &wire) {
         if (!m_ADC.begin(ADS1X15_ADDRESS, &wire)) {
             ESP_LOGE("ADS1X15Interface", "failed to initialize ADS1X15 interface");
             return false;
@@ -57,7 +52,7 @@ namespace sensor {
         return analogReadMilliVolts(channel) * 1000.0f;
 #else
         float max = 1 << m_Resolution;
-        return analogRead(channel) * (m_Vref / max);
+        return (analogRead(channel) * m_Vref) / max;
 #endif
     };
 }

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <optional>
 #include <RadioLib.h>
 
 #include "lora/nettime.hh"
@@ -9,35 +8,6 @@
 #include "task.hh"
 
 namespace lora {
-    struct Broadcast {
-        constexpr static size_t BROADCAST_SIZE = 6;
-
-        uint8_t id;
-        uint8_t layer;
-
-        /**
-         * @brief O tempo, em microsegundos, passado desde o fim da transmissão do 
-         * primeiro broadcast com origem no gateway.
-         */
-        int32_t referenceTime_us;
-
-        /**
-         * @brief Tenta decodificar um broadcast.
-         * @param buffer Um buffer contendo pelo menos `length` bytes.
-         * @param length O tamanho do pacote LoRa recebido.
-         * @returns O pacote decodificado, ou `std::nullopt` se não for um broadcast válido.
-         */
-        static std::optional<Broadcast> decode(uint8_t *buffer, size_t length);
-
-        /**
-         * @brief Tenta codificar um broadcast.
-         * @param buffer Um buffer contendo pelo menos `length` bytes.
-         * @param length O tamanho do buffer. Deve ser pelo menos `Broadcast::BROADCAST_SIZE`.
-         * @returns `false` se o pacote não foi decodificado por falta de espaço no buffer, `true` caso contrário.
-         */
-        bool encode(uint8_t *buffer, size_t length);
-    };
-
     struct ExperimentalState {
         lora::Parameters params;
 
@@ -82,10 +52,11 @@ namespace lora {
 
         /**
          * @brief Atualizando o estado atual do protocolo de acordo com um broadcast recebido.
-         * @returns Um pacote de broadcast para ser re-transmitido, ou `std::nullopt`
-         * caso não seja necessário.
+         * @param packet O pacote de broadcast recebido.
+         * @param out Um pacote de broadcast de saída para ser re-transmitido.
+         * @returns `true` caso o pacote colocado em `out` deva ser re-transmitido.
          */
-        std::optional<Broadcast> on_recv_broadcast(const Broadcast &packet);
+        bool on_recv_broadcast(const Broadcast &packet, Broadcast &out);
 
         /**
          * @brief Inicia, executa e finaliza o estado de inicialização do protocolo.
@@ -117,7 +88,7 @@ namespace lora {
         /**
          * @brief ISR que notifica a task do protocolo experimental.
          */
-        static void IRAM_ATTR isr_notify_task();
+        static void ISR_SAFE_ATTR isr_notify_task();
     private:
         ExperimentalState &m_State;
 
@@ -125,7 +96,5 @@ namespace lora {
         int64_t m_HRTTimeAtISR_us;
 
         esp_timer_handle_t m_TimeoutTimer;
-    };
-
-    
+    };    
 }

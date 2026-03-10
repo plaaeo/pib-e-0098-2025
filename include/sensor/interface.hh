@@ -1,6 +1,8 @@
 #pragma once
-#include <cstdint>
+#include <stdint.h>
 #include <Adafruit_ADS1X15.h>
+
+#include "types.hh"
 
 /**
  * @todo Separar constantes de calibração em variáveis do EEPROM
@@ -43,7 +45,7 @@ namespace sensor {
         /**
          * @brief Inicializa a interface.
          */
-        bool begin(gpio_num_t sda, gpio_num_t sdl, TwoWire &wire);
+        bool begin(TwoWire &wire);
 
         /**
          * @brief Mede a tensão no canal especificado. O canal

@@ -1,39 +1,17 @@
-#include <freertos/FreeRTOS.h>
-#include <esp_log.h>
+#ifdef ESP32
+#   include <freertos/FreeRTOS.h>
+#   include <freertos/task.h>
+#else
+#   include <Arduino_FreeRTOS.h>
+#endif
 
+#include "types.hh"
 #include "lora/util.hh"
 #include "lora/experimental.hh"
 
 namespace lora {
     constexpr static auto TAG = "proto.experimental";
     static ExperimentalProtocol *g_Instance = nullptr;
-
-    std::optional<Broadcast> Broadcast::decode(uint8_t *buffer, size_t length)  {
-        if (length != BROADCAST_SIZE)
-            return std::nullopt;
-        
-        Broadcast out;
-        out.id = buffer[0];
-        out.layer = buffer[1];
-        out.referenceTime_us = buffer[2];
-        out.referenceTime_us = (out.referenceTime_us << 8) | buffer[3];
-        out.referenceTime_us = (out.referenceTime_us << 8) | buffer[4];
-        out.referenceTime_us = (out.referenceTime_us << 8) | buffer[5];
-        return out;
-    }
-
-    bool Broadcast::encode(uint8_t *buffer, size_t length)  {
-        if (length < BROADCAST_SIZE)
-            return false;
-        
-        buffer[0] = id;
-        buffer[1] = layer;
-        buffer[2] = (referenceTime_us >> 24) & 0xFF;
-        buffer[3] = (referenceTime_us >> 16) & 0xFF;
-        buffer[4] = (referenceTime_us >> 8 ) & 0xFF;
-        buffer[5] = referenceTime_us & 0xFF;
-        return true;
-    }
 
     ExperimentalProtocol::ExperimentalProtocol(PhysicalLayer *phys, ExperimentalState &state)
         : Protocol(phys)
@@ -69,14 +47,14 @@ namespace lora {
      * @returns Um pacote de broadcast para ser re-transmitido, ou `std::nullopt`
      * caso não seja necessário.
      */
-    std::optional<Broadcast> ExperimentalProtocol::on_recv_broadcast(const Broadcast &packet) {
+    bool ExperimentalProtocol::on_recv_broadcast(const Broadcast &packet, Broadcast &out) {
         /**
          * @todo Adicionar lógica de salvamento de vizinhos.
          */
 
         // Caso seja de uma camada maior, não é necessário retransmitir.
         if (packet.layer > m_State.layer)
-            return std::nullopt;
+            return false;
 
         // Atualizar fonte de referência do tempo
         if (m_State.layer == UINT8_MAX) {
@@ -87,22 +65,25 @@ namespace lora {
              * tempo de um símbolo LoRa. Como uma forma de minimizar a influência desse delay na sincronização, removemos
              * o tempo de 1 símbolo do tempo de recepção (IRQ) para aproximar o tempo em que a transmissão realmente finalizou.
              */
-            int64_t symbolTime_us = (m_State.params.dr.spreadingFactor * 1000U) / m_State.params.dr.bandwidth;
+            int64_t symbolTime_us = (1000UL << m_State.params.dr.spreadingFactor) / m_State.params.dr.bandwidth;
             auto transmissionEndTime_us = g_Instance->m_HRTTimeAtISR_us - symbolTime_us;
 
-            m_State.net_time.synchronize(packet.referenceTime_us, transmissionEndTime_us);
+            m_State.net_time.synchronize(packet.reference_time_us, transmissionEndTime_us);
 
-            ESP_LOGI(TAG, "network time is %llius (reference time was %ius)", m_State.net_time.get_time_us(), packet.referenceTime_us);
+            ESP_LOGI(TAG, "symbol time compensation was %llius", symbolTime_us);
+            ESP_LOGI(TAG, "network time is %llius (reference time was %ius)", m_State.net_time.get_time_us(), packet.reference_time_us);
         }
     
         m_State.layer = packet.layer + 1;
 
         // Retornar broadcast de resposta
-        return (Broadcast) {
+        out = (Broadcast) {
             .id = m_State.id,
             .layer = m_State.layer,
-            .referenceTime_us = packet.referenceTime_us,
+            .reference_time_us = packet.reference_time_us,
         };
+
+        return true;
     };
 
     void ExperimentalProtocol::do_initialization_stage() {
@@ -148,8 +129,9 @@ namespace lora {
 
             // Ler e decodificar broadcast
             assert(m_Phys->readData(buffer, sizeof(buffer)) == RADIOLIB_ERR_NONE);
-            auto packet = Broadcast::decode(buffer, length);
-            if (unlikely(!packet)) {
+            
+            Broadcast packet;
+            if (!Broadcast::decode(buffer, length, packet)) {
                 ESP_LOGI(TAG, "broadcast was invalid");
                 continue;
             }
@@ -157,7 +139,7 @@ namespace lora {
             ESP_LOGI(TAG, "broadcast from ID %hhu, layer %hhu (rrsi=%f, snr=%f)", packet->id, packet->layer, m_Phys->getRSSI(), m_Phys->getSNR());
             
             // Atualizar estado e verificar necessidade de retransmissão
-            auto response = on_recv_broadcast(*packet);
+            auto response = on_recv_broadcast(packet, packet);
             if (!response)
                 continue;
              
@@ -179,11 +161,11 @@ namespace lora {
              * Após a recepcão do próximo nó, ainda há um pequeno delay não deterministico de processamento
              * necessário para o radiotransmissor conseguir demodular o pacote e corrigir erros.
              */
-            response->referenceTime_us = static_cast<int32_t>(
+            packet.reference_time_us = static_cast<int32_t>(
                 m_State.net_time.get_time_us() + expectedToA_us
             );
 
-            assert(response->encode(buffer, sizeof(buffer)));
+            assert(packet.encode(buffer, sizeof(buffer)));
 
             // Realizar a retransmissão
             lora::send_nonblocking(m_Phys, {
@@ -229,7 +211,7 @@ namespace lora {
 #ifdef CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
         // Configurar callback especial caso timers sejam despachados por interrupts
         timer_cfg.dispatch_method = ESP_TIMER_ISR;
-        timer_cfg.callback = [] (void *arg) IRAM_ATTR {
+        timer_cfg.callback = [] (void *arg) ISR_SAFE_ATTR {
             // Interromper a task atual se uma de prioridade maior for acordada.
             auto self = static_cast<ExperimentalProtocol *>(arg);
             if (self->notify_from_isr(NOTIFICATION_TIMER))
@@ -280,12 +262,12 @@ namespace lora {
                 nextTimerTime_us - m_State.net_time.get_time_us()
             );
 
-            if constexpr (STATUS_LED != GPIO_NUM_NC) {
-                ledState = (ledState > 0) ? 0 : 1;
-                gpio_hold_dis(STATUS_LED);
-                gpio_set_level(STATUS_LED, ledState);
-                gpio_hold_en(STATUS_LED);
-            }
+            // if constexpr (STATUS_LED != GPIO_NUM_NC) {
+            //     ledState = (ledState > 0) ? 0 : 1;
+            //     gpio_hold_dis(STATUS_LED);
+            //     gpio_set_level(STATUS_LED, ledState);
+            //     gpio_hold_en(STATUS_LED);
+            // }
             
             await(NOTIFICATION_TIMER);
             auto time_us = m_State.net_time.get_time_us();
@@ -381,7 +363,7 @@ namespace lora {
     /**
      * @brief ISR que notifica a task do protocolo experimental.
      */
-    void IRAM_ATTR ExperimentalProtocol::isr_notify_task() {
+    void ISR_SAFE_ATTR ExperimentalProtocol::isr_notify_task() {
         if (g_Instance == NULL)
             return;
 
