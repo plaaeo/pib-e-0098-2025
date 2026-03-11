@@ -11,6 +11,11 @@ namespace port {
     ISR_SAFE_ATTR port::time_us get_monotonic_time();
 
     /**
+     * @returns Uma medida de tempo de um RTC, em microssegundos.
+     */
+    port::time_us get_rtc_time();
+
+    /**
      * @brief Uma abstração para um timer que notifica uma task ao finalizar.
      */
     struct NotifyTimer {

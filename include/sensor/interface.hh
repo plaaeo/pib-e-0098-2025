@@ -1,6 +1,9 @@
 #pragma once
 #include <stdint.h>
+
+#ifdef ESP32
 #include <Adafruit_ADS1X15.h>
+#endif
 
 #include "port/types.hh"
 
@@ -35,6 +38,7 @@ namespace sensor {
         AnalogInterface& operator=(const AnalogInterface&) = delete;
     };
 
+#ifdef ESP32
     /**
      * @brief Uma interface analógica para ADCs externos do modelo ADS1X15.
      */
@@ -56,6 +60,7 @@ namespace sensor {
     protected:
         Adafruit_ADS1X15 m_ADC;
     };
+#endif 
 
     /**
      * @brief Uma interface analógica para ADCs internos usando a interface

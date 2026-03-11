@@ -274,16 +274,16 @@ namespace lora {
                 flags = lora::get_irq_flags(m_Phys);
 
                 PORT_LOGD(TAG, "ExperimentalProtocol::await_phys_irq() {");
-                PORT_LOGD(TAG, "\t.tx_done = %i", flags.tx_done);
-                PORT_LOGD(TAG, "\t.rx_done = %i", flags.rx_done);
-                PORT_LOGD(TAG, "\t.preamble_detected = %i", flags.preamble_detected);
-                PORT_LOGD(TAG, "\t.sync_word_valid = %i", flags.sync_word_valid);
-                PORT_LOGD(TAG, "\t.header_valid = %i", flags.header_valid);
-                PORT_LOGD(TAG, "\t.header_err = %i", flags.header_err);
-                PORT_LOGD(TAG, "\t.crc_err = %i", flags.crc_err);
-                PORT_LOGD(TAG, "\t.cad_done = %i", flags.cad_done);
-                PORT_LOGD(TAG, "\t.cad_detected = %i", flags.cad_detected);
-                PORT_LOGD(TAG, "\t.timeout = %i", flags.timeout);
+                PORT_LOGD(TAG, "\t.tx_done = %u", flags.tx_done);
+                PORT_LOGD(TAG, "\t.rx_done = %u", flags.rx_done);
+                PORT_LOGD(TAG, "\t.preamble_detected = %u", flags.preamble_detected);
+                PORT_LOGD(TAG, "\t.sync_word_valid = %u", flags.sync_word_valid);
+                PORT_LOGD(TAG, "\t.header_valid = %u", flags.header_valid);
+                PORT_LOGD(TAG, "\t.header_err = %u", flags.header_err);
+                PORT_LOGD(TAG, "\t.crc_err = %u", flags.crc_err);
+                PORT_LOGD(TAG, "\t.cad_done = %u", flags.cad_done);
+                PORT_LOGD(TAG, "\t.cad_detected = %u", flags.cad_detected);
+                PORT_LOGD(TAG, "\t.timeout = %u", flags.timeout);
                 PORT_LOGD(TAG, "}");
 
                 /** @todo Lidar com recepções */
@@ -299,7 +299,7 @@ namespace lora {
     }
 
     Notification ExperimentalProtocol::await(uint32_t mask) {
-#ifndef NDEBUG
+#if !defined(NDEBUG) && defined(ESP32) && ESP32
         // Sincronizar logs caso seja uma build de debug
         fflush(stdout);
         fsync(fileno(stdout));

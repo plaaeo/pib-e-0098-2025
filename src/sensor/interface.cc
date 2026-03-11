@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include "sensor/interface.hh"
 
 namespace sensor {
@@ -7,6 +8,7 @@ namespace sensor {
         return m_ChannelCount;
     };
 
+#ifdef ESP32
     ADS1X15Interface::ADS1X15Interface()
         : AnalogInterface(4)
     {}
@@ -27,6 +29,7 @@ namespace sensor {
             m_ADC.readADC_SingleEnded(channel)
         );
     };
+#endif
 
     ArduinoInterface::ArduinoInterface(uint8_t resolution_bits, float vref)
         : AnalogInterface(NUM_ANALOG_INPUTS)

@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <Adafruit_ADS1X15.h>
+#include <LoRa.h>
 #include <stdint.h>
 
 #include "sensor/reading.hh"
@@ -7,6 +7,7 @@
 #include "sensor/temperature.hh"
 #include "sensor/tds.hh"
 #include "sensor/ph.hh"
+#include "repr/reading.hh"
 
 constexpr auto TAG = "sens";
 
@@ -75,6 +76,9 @@ static struct {
 //< Interface analógica para coletas do Arduino.
 sensor::ArduinoInterface g_ADC(10, 5);
 
+static Module g_Module(SS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
+static LORA_RADIO g_Phys = LORA_RADIO(&g_Module);
+
 void setup() {
 #ifdef STATUS_LED
     if constexpr (STATUS_LED != GPIO_NUM_NC) {
@@ -83,19 +87,31 @@ void setup() {
 #endif
     
     Serial.begin(115200);
+
+    SPI.begin();
+    g_Phys.begin(915.0f);
+    g_Phys.forceLDRO(false);
 };
 
 void loop() {
     if (!Serial) return;
     
     auto reading = g_Sensors.measure(g_ADC);
-    
-    Serial.print("temp (degC):");
-    Serial.println(reading.temperature);
-    Serial.print("tds (ppm):");
-    Serial.println(reading.tds);
-    Serial.print("pH:");
-    Serial.println(reading.ph);
+    auto packet = repr::CompressedReading::compress(reading);
 
-    delay(1000);
+    PORT_LOGI("sensor", "Temperatura: %f deg C", reading.temperature);
+    PORT_LOGI("sensor", "TDS: %f ppm", reading.tds);
+    PORT_LOGI("sensor", "pH: %f", reading.ph);
+    PORT_LOGI("sensor", "Transmitindo utilizando LoRa...");
+
+    uint8_t buf[3] = { };
+    buf[0] = packet.temperature;
+    buf[1] = packet.tds;
+    buf[2] = packet.ph;
+    assert(g_Phys.transmit(buf, 3) == RADIOLIB_ERR_NONE);
+
+    PORT_LOGI("sensor", "Transmissão finalizada");
+
+
+    delay(10000);
 }

@@ -8,6 +8,12 @@ namespace port {
         return esp_timer_get_time();
     };
 
+    port::time_us get_rtc_time() {
+        return static_cast<port::time_us>(
+            esp_rtc_get_time_us()
+        );
+    }
+
     NotifyTimer::NotifyTimer(port::Task *task, uint32_t notification)
         : m_Inner(nullptr)
         , m_Task(task)
