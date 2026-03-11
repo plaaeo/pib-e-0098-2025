@@ -1,5 +1,5 @@
 #include <assert.h>
-#include "types.hh"
+#include "port/types.hh"
 #include "lora/util.hh"
 
 namespace lora {
@@ -34,25 +34,25 @@ namespace lora {
         
         status = phys->setDataRate({ .lora = params.dr }, RADIOLIB_MODEM_LORA);
         if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE("lora", "failed to set datarate (%hi)", status);
+            PORT_LOGE("lora", "failed to set datarate (%hi)", status);
 
         status = phys->setFrequency(params.freq_mhz);
         if (status != RADIOLIB_ERR_NONE) {
-            ESP_LOGE("lora", "failed to set radio frequency (%hi)", status);
+            PORT_LOGE("lora", "failed to set radio frequency (%hi)", status);
             abort();
         }
 
         status = phys->setOutputPower(params.power_db);
         if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE("lora", "failed to set output power (%hi)", status);
+            PORT_LOGE("lora", "failed to set output power (%hi)", status);
             
         status = phys->setPreambleLength(params.preambleLength);
         if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE("lora", "failed to set preamble length (%hi)", status);
+            PORT_LOGE("lora", "failed to set preamble length (%hi)", status);
 
         status = phys->setSyncWord((uint8_t *) &params.syncWord, 1);
         if (status != RADIOLIB_ERR_NONE)
-            ESP_LOGE("lora", "failed to set syncword (%hi)", status);
+            PORT_LOGE("lora", "failed to set syncword (%hi)", status);
     }
 
 

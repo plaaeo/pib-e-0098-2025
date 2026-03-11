@@ -95,7 +95,7 @@ void task_sensor() {
 
     // Tentar inicializar ADC externo
     if (!g_ADC.begin(ADS1115_SDA, ADS1115_SCL, Wire)) {
-        ESP_LOGW(TAG, "falha ao inicializar o ADS1X15, leituras não serão realizadas");
+        PORT_LOGW(TAG, "falha ao inicializar o ADS1X15, leituras não serão realizadas");
     }
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);

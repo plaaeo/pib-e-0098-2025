@@ -1,5 +1,6 @@
-#include "sensor/temperature.hh"
 #include <math.h>
+
+#include "sensor/temperature.hh"
 
 namespace sensor {
     float NTC10kState::convert(float volts) const {

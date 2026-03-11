@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <Adafruit_ADS1X15.h>
 
-#include "types.hh"
+#include "port/types.hh"
 
 /**
  * @todo Separar constantes de calibração em variáveis do EEPROM

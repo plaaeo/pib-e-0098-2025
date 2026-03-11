@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include "types.hh"
+#include "port/types.hh"
 
 #ifdef ESP32
 #   include <freertos/FreeRTOS.h>
@@ -9,7 +9,7 @@
 #   include <Arduino_FreeRTOS.h>
 #endif
 
-namespace task {
+namespace port {
     constexpr auto STACK_SIZE = 4096;
 
     /**

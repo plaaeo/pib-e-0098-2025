@@ -1,4 +1,3 @@
-#include "types.hh"
 #include "sensor/interface.hh"
 
 namespace sensor {
@@ -14,7 +13,7 @@ namespace sensor {
 
     bool ADS1X15Interface::begin(TwoWire &wire) {
         if (!m_ADC.begin(ADS1X15_ADDRESS, &wire)) {
-            ESP_LOGE("ADS1X15Interface", "failed to initialize ADS1X15 interface");
+            PORT_LOGE("ADS1X15Interface", "failed to initialize ADS1X15 interface");
             return false;
         }
 

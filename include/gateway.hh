@@ -61,19 +61,19 @@ namespace gw {
     void setup() {
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         
-        ESP_LOGI(TAG, "Connecting to Wi-Fi...");
+        PORT_LOGI(TAG, "Connecting to Wi-Fi...");
         while (WiFi.status() != WL_CONNECTED)
             delay(300);
         
         // Log IP address
-        ESP_LOGI(TAG, "Connected as %s", WiFi.localIP().toString().c_str());
+        PORT_LOGI(TAG, "Connected as %s", WiFi.localIP().toString().c_str());
 
         // Initialize NTP
-        ESP_LOGI(TAG, "Initializing NTP...");
+        PORT_LOGI(TAG, "Initializing NTP...");
         configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
-        ESP_LOGI(TAG, "NTP configured at %s", getCurrentTimestamp().c_str());
+        PORT_LOGI(TAG, "NTP configured at %s", getCurrentTimestamp().c_str());
 
-        ESP_LOGI(TAG, "Firebase Client v" FIREBASE_CLIENT_VERSION);
+        PORT_LOGI(TAG, "Firebase Client v" FIREBASE_CLIENT_VERSION);
         
         /* Configure service account credentials (from 'secret.hh') */
         config.service_account.data.project_id = FIREBASE_PROJECT_ID;
@@ -92,7 +92,7 @@ namespace gw {
 
         // Comment or pass false value when WiFi reconnection will control by your code or third party library e.g. WiFiManager
         Firebase.reconnectNetwork(true);
-        ESP_LOGI(TAG, "Firebase initialized.");
+        PORT_LOGI(TAG, "Firebase initialized.");
     }
 
     //< Envia uma unica `sens::reading_t` para o Firestore.
@@ -100,9 +100,9 @@ namespace gw {
         auto timestamp = getCurrentTimestamp();
 
         // Aguardar o Firebase estar pronto (?)
-        ESP_LOGI(TAG, "Aguardando o Firebase...");
+        PORT_LOGI(TAG, "Aguardando o Firebase...");
         while (!Firebase.ready()) { };
-        ESP_LOGI(TAG, "Enviando ao Firebase...");
+        PORT_LOGI(TAG, "Enviando ao Firebase...");
 
         // Preencher documento com valores estáticos
         FirebaseJson json;
@@ -128,9 +128,9 @@ namespace gw {
 
             // Criar documento no Firestore
             if (Firebase.Firestore.createDocument(&fbData, FIREBASE_PROJECT_ID, "", "leiturasSensores", json.raw())) {
-                ESP_LOGI(TAG, "Coleta de '%s' enviada para o Firestore", coleta.id);
+                PORT_LOGI(TAG, "Coleta de '%s' enviada para o Firestore", coleta.id);
             } else {
-                ESP_LOGE(TAG, "Falha ao enviar '%s' ao Firestore: %s", coleta.id, fbData.errorReason().c_str());
+                PORT_LOGE(TAG, "Falha ao enviar '%s' ao Firestore: %s", coleta.id, fbData.errorReason().c_str());
             }
         }
     }

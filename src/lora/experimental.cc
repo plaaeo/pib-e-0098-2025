@@ -5,7 +5,7 @@
 #   include <Arduino_FreeRTOS.h>
 #endif
 
-#include "types.hh"
+#include "port/types.hh"
 #include "lora/util.hh"
 #include "lora/experimental.hh"
 
@@ -15,8 +15,9 @@ namespace lora {
 
     ExperimentalProtocol::ExperimentalProtocol(PhysicalLayer *phys, ExperimentalState &state)
         : Protocol(phys)
-        , task::Task("experimental-protocol", 2)
+        , port::Task("experimental-protocol", 2)
         , m_State(state)
+        , m_TimeoutTimer(this, NOTIFICATION_TIMER)
     { };
 
     /**
@@ -33,20 +34,10 @@ namespace lora {
         return g_Instance;
     };
 
-    /**
-     * @brief Agenda a transmissão de uma leitura de sensor quando possível.
-     * @param reading A leitura realizada pelo nó sensor.
-     * @returns `true` se foi possível agendar a transmissão.
-     */
     bool ExperimentalProtocol::schedule(const sensor::Reading& reading) {
         return false;
     };
 
-    /**
-     * @brief Atualizando o estado atual do protocolo de acordo com um broadcast recebido.
-     * @returns Um pacote de broadcast para ser re-transmitido, ou `std::nullopt`
-     * caso não seja necessário.
-     */
     bool ExperimentalProtocol::on_recv_broadcast(const Broadcast &packet, Broadcast &out) {
         /**
          * @todo Adicionar lógica de salvamento de vizinhos.
@@ -66,12 +57,12 @@ namespace lora {
              * o tempo de 1 símbolo do tempo de recepção (IRQ) para aproximar o tempo em que a transmissão realmente finalizou.
              */
             int64_t symbolTime_us = (1000UL << m_State.params.dr.spreadingFactor) / m_State.params.dr.bandwidth;
-            auto transmissionEndTime_us = g_Instance->m_HRTTimeAtISR_us - symbolTime_us;
+            auto transmissionEndTime_us = g_Instance->m_MonoTimeAtISR_us - symbolTime_us;
 
             m_State.net_time.synchronize(packet.reference_time_us, transmissionEndTime_us);
 
-            ESP_LOGI(TAG, "symbol time compensation was %llius", symbolTime_us);
-            ESP_LOGI(TAG, "network time is %llius (reference time was %ius)", m_State.net_time.get_time_us(), packet.reference_time_us);
+            PORT_LOGI(TAG, "symbol time compensation was %llius", symbolTime_us);
+            PORT_LOGI(TAG, "network time is %llius (reference time was %ius)", m_State.net_time.get_time_us(), packet.reference_time_us);
         }
     
         m_State.layer = packet.layer + 1;
@@ -91,11 +82,11 @@ namespace lora {
         Notification notif;
 
         m_State.layer = UINT8_MAX;
-        ESP_LOGI(TAG, "starting broadcast rx session");
+        PORT_LOGI(TAG, "starting broadcast rx session");
 
         // Calcular o tempo esperado de transmissão de um broadcast para esse radio
         int64_t expectedToA_us = m_Phys->getTimeOnAir(Broadcast::BROADCAST_SIZE);
-        ESP_LOGI(TAG, "expected time on air is %llu microseconds", expectedToA_us);
+        PORT_LOGI(TAG, "expected time on air is %llu microseconds", expectedToA_us);
 
         do {
             // Iniciar recepção sem timeout
@@ -110,20 +101,20 @@ namespace lora {
             
             auto flags = lora::get_irq_flags(m_Phys);
             if (!notif.irq || !flags.rx_done) {
-                ESP_LOGI(TAG, "interrupted without rx done");
+                PORT_LOGI(TAG, "interrupted without rx done");
                 continue;
             }
             
             // Verificar se a recepção teve sucesso
             if (flags.crc_err || flags.header_err || flags.timeout) {
-                ESP_LOGI(TAG, "received failed broadcast");
+                PORT_LOGI(TAG, "received failed broadcast");
                 continue;
             }
 
             // Verificar se o pacote tem o tamanho correto
             auto length = m_Phys->getPacketLength();
             if (length != Broadcast::BROADCAST_SIZE) {
-                ESP_LOGI(TAG, "received broadcast with wrong length");
+                PORT_LOGI(TAG, "received broadcast with wrong length");
                 continue;
             }
 
@@ -132,11 +123,11 @@ namespace lora {
             
             Broadcast packet;
             if (!Broadcast::decode(buffer, length, packet)) {
-                ESP_LOGI(TAG, "broadcast was invalid");
+                PORT_LOGI(TAG, "broadcast was invalid");
                 continue;
             }
             
-            ESP_LOGI(TAG, "broadcast from ID %hhu, layer %hhu (rrsi=%f, snr=%f)", packet->id, packet->layer, m_Phys->getRSSI(), m_Phys->getSNR());
+            PORT_LOGI(TAG, "broadcast from ID %hhu, layer %hhu (rrsi=%f, snr=%f)", packet.id, packet.layer, m_Phys->getRSSI(), m_Phys->getSNR());
             
             // Atualizar estado e verificar necessidade de retransmissão
             auto response = on_recv_broadcast(packet, packet);
@@ -145,7 +136,7 @@ namespace lora {
              
             // Calcular um tempo aleatório antes de re-transmitir (evita colisões)
             uint32_t delay_ms = m_Phys->randomByte();
-            ESP_LOGI(TAG, "waiting %u milliseconds...", delay_ms);
+            PORT_LOGI(TAG, "waiting %u milliseconds...", delay_ms);
             vTaskDelay(delay_ms / portTICK_PERIOD_MS);
             
             /**
@@ -179,15 +170,15 @@ namespace lora {
             flags = lora::get_irq_flags(m_Phys);
             assert(notif.irq && flags.tx_done);
 
-            ESP_LOGI(TAG, "retransmitted broadcast");
+            PORT_LOGI(TAG, "retransmitted broadcast");
 
             // Reiniciar timeout para 8 * o delay aleatório máximo
-            esp_timer_stop(m_TimeoutTimer);
-            esp_timer_start_once(m_TimeoutTimer, UINT8_MAX * 1000U * 8U);
+            m_TimeoutTimer.stop();
+            m_TimeoutTimer.start_once(UINT8_MAX * 1000U * 8U);
         } while (!notif.timer);
 
-        esp_timer_stop(m_TimeoutTimer);
-        ESP_LOGI(TAG, "ended broadcast rx session, I'm ID %hhu at layer %hhu", m_State.id, m_State.layer);
+        m_TimeoutTimer.stop();
+        PORT_LOGI(TAG, "ended broadcast rx session, I'm ID %hhu at layer %hhu", m_State.id, m_State.layer);
 
         assert(m_Phys->finishReceive() == RADIOLIB_ERR_NONE);
     };
@@ -196,31 +187,6 @@ namespace lora {
      * @brief Função principal da task do protocolo experimental.
      */
     void ExperimentalProtocol::main() {
-        // Criar timer para gerenciamento manual de timeouts
-        esp_timer_create_args_t timer_cfg {
-            .callback = [] (void *arg) {
-                auto self = static_cast<ExperimentalProtocol *>(arg);
-                self->notify(NOTIFICATION_TIMER);
-            },
-            .arg = this,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "experimental-protocol-timer",
-            .skip_unhandled_events = false,
-        };
-
-#ifdef CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD
-        // Configurar callback especial caso timers sejam despachados por interrupts
-        timer_cfg.dispatch_method = ESP_TIMER_ISR;
-        timer_cfg.callback = [] (void *arg) ISR_SAFE_ATTR {
-            // Interromper a task atual se uma de prioridade maior for acordada.
-            auto self = static_cast<ExperimentalProtocol *>(arg);
-            if (self->notify_from_isr(NOTIFICATION_TIMER))
-                portYIELD_FROM_ISR();
-        };
-#endif
-
-        ESP_ERROR_CHECK(esp_timer_create(&timer_cfg, &m_TimeoutTimer));
-
         // Configurar ISR
         m_Phys->setPacketSentAction(ExperimentalProtocol::isr_notify_task);
         m_Phys->setPacketReceivedAction(ExperimentalProtocol::isr_notify_task);
@@ -257,10 +223,7 @@ namespace lora {
         uint32_t ledState = 0;
         for (;;) {
             nextTimerTime_us += 1000000LL;
-            esp_timer_start_once(
-                m_TimeoutTimer,
-                nextTimerTime_us - m_State.net_time.get_time_us()
-            );
+            m_TimeoutTimer.start_once(nextTimerTime_us - m_State.net_time.get_time_us());
 
             // if constexpr (STATUS_LED != GPIO_NUM_NC) {
             //     ledState = (ledState > 0) ? 0 : 1;
@@ -277,7 +240,7 @@ namespace lora {
                 driftSign = '-';
                 drift_us = -drift_us;
             }
-            ESP_LOGI(TAG, "current time is: %lli.%06llis after broadcast (drifted %c%lli.%06lli)", time_us / 1000000, time_us % 1000000LL, driftSign, drift_us / 1000000, drift_us % 1000000LL);
+            PORT_LOGI(TAG, "current time is: %lli.%06llis after broadcast (drifted %c%lli.%06lli)", time_us / 1000000, time_us % 1000000LL, driftSign, drift_us / 1000000, drift_us % 1000000LL);
         }
     }
 
@@ -295,9 +258,9 @@ namespace lora {
             },
         };
 
-        ESP_LOGI(TAG, "opening rx window for %ums", window_ms);
-        esp_timer_stop(m_TimeoutTimer);
-        esp_timer_start_once(m_TimeoutTimer, window_ms * 1000);
+        PORT_LOGI(TAG, "opening rx window for %ums", window_ms);
+
+        m_TimeoutTimer.start_once(window_ms * 1000);
 
         do {
             // Iniciar recepção contínua
@@ -310,18 +273,18 @@ namespace lora {
             if (notif.irq) {
                 flags = lora::get_irq_flags(m_Phys);
 
-                ESP_LOGD(TAG, "ExperimentalProtocol::await_phys_irq() {");
-                ESP_LOGD(TAG, "\t.tx_done = %i", flags.tx_done);
-                ESP_LOGD(TAG, "\t.rx_done = %i", flags.rx_done);
-                ESP_LOGD(TAG, "\t.preamble_detected = %i", flags.preamble_detected);
-                ESP_LOGD(TAG, "\t.sync_word_valid = %i", flags.sync_word_valid);
-                ESP_LOGD(TAG, "\t.header_valid = %i", flags.header_valid);
-                ESP_LOGD(TAG, "\t.header_err = %i", flags.header_err);
-                ESP_LOGD(TAG, "\t.crc_err = %i", flags.crc_err);
-                ESP_LOGD(TAG, "\t.cad_done = %i", flags.cad_done);
-                ESP_LOGD(TAG, "\t.cad_detected = %i", flags.cad_detected);
-                ESP_LOGD(TAG, "\t.timeout = %i", flags.timeout);
-                ESP_LOGD(TAG, "}");
+                PORT_LOGD(TAG, "ExperimentalProtocol::await_phys_irq() {");
+                PORT_LOGD(TAG, "\t.tx_done = %i", flags.tx_done);
+                PORT_LOGD(TAG, "\t.rx_done = %i", flags.rx_done);
+                PORT_LOGD(TAG, "\t.preamble_detected = %i", flags.preamble_detected);
+                PORT_LOGD(TAG, "\t.sync_word_valid = %i", flags.sync_word_valid);
+                PORT_LOGD(TAG, "\t.header_valid = %i", flags.header_valid);
+                PORT_LOGD(TAG, "\t.header_err = %i", flags.header_err);
+                PORT_LOGD(TAG, "\t.crc_err = %i", flags.crc_err);
+                PORT_LOGD(TAG, "\t.cad_done = %i", flags.cad_done);
+                PORT_LOGD(TAG, "\t.cad_detected = %i", flags.cad_detected);
+                PORT_LOGD(TAG, "\t.timeout = %i", flags.timeout);
+                PORT_LOGD(TAG, "}");
 
                 /** @todo Lidar com recepções */
     
@@ -332,7 +295,7 @@ namespace lora {
 
         // Finalizar recepção
         m_Phys->finishReceive();
-        ESP_LOGI(TAG, "closing rx window");
+        PORT_LOGI(TAG, "closing rx window");
     }
 
     Notification ExperimentalProtocol::await(uint32_t mask) {
@@ -345,11 +308,11 @@ namespace lora {
         uint32_t notification = 0;
         
         do {
-            notification = task::await_notification();
+            notification = port::await_notification();
 
             if (notification & NOTIFICATION_KILL) {
                 /** @todo Receber notificações KILL */
-                ESP_LOGE(TAG, "ordered to kill ExperimentalProtocol task");
+                PORT_LOGE(TAG, "ordered to kill ExperimentalProtocol task");
                 notification ^= NOTIFICATION_KILL;
             }
         } while ((notification & mask) == 0);
@@ -367,8 +330,7 @@ namespace lora {
         if (g_Instance == NULL)
             return;
 
-        // É seguro chamar `esp_timer_get_time` em um ISR
-        g_Instance->m_HRTTimeAtISR_us = esp_timer_get_time();
+        g_Instance->m_MonoTimeAtISR_us = port::get_monotonic_time();
 
         // Interromper a task atual se uma de prioridade maior for acordada.
         if (g_Instance->notify_from_isr(NOTIFICATION_IRQ))

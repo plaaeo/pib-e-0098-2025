@@ -5,7 +5,8 @@
 #include "lora/nettime.hh"
 #include "lora/proto.hh"
 #include "lora/util.hh"
-#include "task.hh"
+#include "port/task.hh"
+#include "port/time.hh"
 
 namespace lora {
     struct ExperimentalState {
@@ -27,7 +28,7 @@ namespace lora {
         NetworkTimer net_time;
     };
 
-    class ExperimentalProtocol : public Protocol, private task::Task {
+    class ExperimentalProtocol : public Protocol, private port::Task {
     protected:
         ExperimentalProtocol(PhysicalLayer *phys, ExperimentalState &state);
 
@@ -74,7 +75,7 @@ namespace lora {
          * @param window_ms Tempo em milisegundos para receber pacotes.
          * @note Como nenhum radiotransmissor LoRa consegue implementar janelas de transmissão contínuas
          * por períodos arbitrários de tempo, a lógica de timeout foi implementada utilizando um timer
-         * do ESP32, que acorda o microcontrolador para cancelar a recepção no momento correto.
+         * que acorda o microcontrolador para cancelar a recepção no momento correto.
          */
         void open_rx_continuous(uint32_t window_ms);
 
@@ -90,11 +91,11 @@ namespace lora {
          */
         static void ISR_SAFE_ATTR isr_notify_task();
     private:
-        ExperimentalState &m_State;
+        ExperimentalState  &m_State;
 
-        //< Salva o resultado de `esp_timer_get_time()` no momento do último IRQ do radio.
-        int64_t m_HRTTimeAtISR_us;
+        //< Salva o resultado de `port::get_monotonic_time()` no momento do último IRQ do radio.
+        port::time_us       m_MonoTimeAtISR_us;
 
-        esp_timer_handle_t m_TimeoutTimer;
+        port::NotifyTimer   m_TimeoutTimer;
     };    
 }
