@@ -78,7 +78,7 @@ namespace lora {
     };
 
     void ExperimentalProtocol::do_initialization_stage() {
-        uint8_t buffer[256] = { };
+        uint8_t buffer[Broadcast::BROADCAST_SIZE] = { };
         Notification notif;
 
         m_State.layer = UINT8_MAX;

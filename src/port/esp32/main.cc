@@ -93,8 +93,12 @@ void task_sensor() {
     static Module s_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
     static LORA_RADIO s_Phys = LORA_RADIO(&s_Module);
 
+    // Tentar inicializar I2C do ADS1115
+    if (!Wire.begin(ADS1115_SDA, ADS1115_SCL)) {
+        PORT_LOGW(TAG, "falha ao inicializar o I2C do ADS1X15, leituras não serão realizadas");
+    }
     // Tentar inicializar ADC externo
-    if (!g_ADC.begin(ADS1115_SDA, ADS1115_SCL, Wire)) {
+    else if (!g_ADC.begin(Wire)) {
         PORT_LOGW(TAG, "falha ao inicializar o ADS1X15, leituras não serão realizadas");
     }
 
@@ -141,9 +145,6 @@ extern "C" void app_main(void) {
     };    
 #endif
     ESP_ERROR_CHECK(esp_pm_configure(&pm_config));
-
-    rtc_clk_32k_enable(true);
-    rtc_clk_slow_freq_set(RTC_SLOW_FREQ_32K_XTAL);
 
     esp_task_wdt_init(30, true);
     task_sensor();
