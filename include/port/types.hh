@@ -17,7 +17,6 @@ namespace port {
 
 #else
 #include <LibPrintf.h>
-#include "port/time.hh"
 
 namespace port {
     using gpio_t = int;

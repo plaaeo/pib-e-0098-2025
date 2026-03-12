@@ -2,6 +2,7 @@
 #include <LoRa.h>
 #include <stdint.h>
 
+#include "port/time.hh"
 #include "sensor/reading.hh"
 #include "sensor/interface.hh"
 #include "sensor/temperature.hh"
