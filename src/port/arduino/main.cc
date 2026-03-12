@@ -88,6 +88,7 @@ void setup() {
         LoRa.setSignalBandwidth(125000);
         LoRa.setCodingRate4(5);
         LoRa.setSyncWord(0x34);
+        LoRa.setTxPower(12);
     } else {
         PORT_LOGE(TAG, "falha ao inicializar LoRa.h");
         pinMode(LED_BUILTIN, OUTPUT);
