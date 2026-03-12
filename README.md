@@ -3,29 +3,15 @@ Uma codebase desenvolvida para realizar atividades envolvendo microcontroladores
 
 O repositório contém um projeto [Platform.IO](https://platformio.org/) utilizando o framework **Arduino** como componente do **ESP-IDF**, permitindo a compatibilidade com bibliotecas desenvolvidas para **Arduino**, porém garantindo a flexibilidade do **ESP-IDF**.
 
-## Estrutura do projeto
+## Branch `integracao-icomp`
 
-```
-iots-base/
-├── include/
-│   ├── gateway.hh      # código de upload para o Firestore, adaptado do gateway
-│   ├── lora.hh         # código de inicialização LoRa temporário (não utilizado!!)
-│   ├── secret.hh       # cabeçalho com chaves de api, senhas de wifi, etc.
-│   └── sensors.hh      # implementação dos sensores, coleta e valores de calibração
-├── src/
-│   ├── CMakeLists.txt
-│   └── main.cc         # código principal do projeto
-├── test/               # diretório para implementação de testes unitários
-│   └── README
-├── .gitignore
-├── CMakeLists.txt
-├── partitions_8MB.csv
-├── platformio.ini      # código de configuração do platform.io
-├── README.md           # este arquivo!
-└── sdkconfig.defaults  # configuração do esp-idf usada para todos os ambientes
-```
+A branch `integracao-icomp` foi criada para implementar dois firmwares simples de transmissão/recepção entre dois nós LoRa para a **Semana de Integração do IComp** de 2026. O arquivo `src/port/arduino/main.cc` contém o código principal de um nó sensor implementado num **Arduino Nano V3** com os 3 sensores (pH, TDS e temperatura) funcionais, coletando de 10 em 10 segundos e transmitindo as coletas via LoRa. O arquivo `src/port/esp32/main.cc` contém o código principal de um gateway implementado num **Heltec WiFi Lora 32 V2** que recebe coletas via LoRa e as envia para uma base no Firestore.
 
-Para modificar os **valores de calibração dos sensores**, modifique `include/sensors.hh`.
+Esta branch foi criada pensando nos seguintes problemas:
+- A implementação do firmware da rede de sensores ainda não estava completa para ser demonstrada no evento;
+- O MCU **ATmega328P** presente no **Arduino Nano V3** não possui um flash grande o suficiente para armazenar a biblioteca RadioLib, utilizada por padrão em todo o projeto;
+- A implementação concreta para o gateway ainda não havia sido desenvolvida (além da transmissão para o Firebase).
+Pensando na data do evento, determinei que seria mais importante fazer uma implementação rápida e descartável, porém cujas partes poderiam ser reutilizadas depois. Logo, pode-se considerar que esta branch estará **inativa** após a data do evento (12 de março de 2026).
 
 ## Platform.IO
 

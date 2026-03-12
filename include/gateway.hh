@@ -7,7 +7,7 @@
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 
-#include "sensors.hh"
+#include "sensor/reading.hh"
 
 //< Possui os '#define's com chave de API do Firebase, URL, login do Wifi, etc.
 #include "secret.hh"
@@ -21,7 +21,7 @@ namespace gw {
     constexpr auto TAG = "gw";
 
     // ID do ponto de coleta atual no Firestore
-    constexpr auto PONTO_ID = "ponto_suframa";
+    constexpr auto PONTO_ID = "ponto_icomp";
     constexpr auto MUNICIPIO = "Manaus";
     constexpr auto LOCAL_COLETA = "Tanque";
     constexpr auto TIPO_AGUA = "Água de tanque";
@@ -96,7 +96,7 @@ namespace gw {
     }
 
     //< Envia uma unica `sens::reading_t` para o Firestore.
-    void send_reading_firestore(const sens::Reading& reading) {
+    void send_reading_firestore(const sensor::Reading& reading) {
         auto timestamp = getCurrentTimestamp();
 
         // Aguardar o Firebase estar pronto (?)

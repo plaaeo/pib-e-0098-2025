@@ -75,43 +75,49 @@ static struct {
 
 //< Interface analógica para coletas do Arduino.
 sensor::ArduinoInterface g_ADC(10, 5);
+bool g_HasLora = false;
 
-static Module g_Module(SS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
-static LORA_RADIO g_Phys = LORA_RADIO(&g_Module);
-
-void setup() {
-#ifdef STATUS_LED
-    if constexpr (STATUS_LED != GPIO_NUM_NC) {
-        pinMode(STATUS_LED, OUTPUT);
-    }
-#endif
-    
+void setup() {    
     Serial.begin(115200);
 
+    LoRa.setPins(SS, LORA_RST, LORA_DIO0);
+    if (LoRa.begin(915000000)) {
+        g_HasLora = true;
+        LoRa.setSpreadingFactor(11);
+        LoRa.setSignalBandwidth(125000);
+        LoRa.setCodingRate4(5);
+        LoRa.setSyncWord(0x34);
+    } else {
+        PORT_LOGE(TAG, "falha ao inicializar LoRa.h");
+        pinMode(LED_BUILTIN, OUTPUT);
+        digitalWrite(LED_BUILTIN, HIGH);
+    }
+
     SPI.begin();
-    g_Phys.begin(915.0f);
-    g_Phys.forceLDRO(false);
 };
 
 void loop() {
     if (!Serial) return;
     
     auto reading = g_Sensors.measure(g_ADC);
-    auto packet = repr::CompressedReading::compress(reading);
 
-    PORT_LOGI("sensor", "Temperatura: %f deg C", reading.temperature);
-    PORT_LOGI("sensor", "TDS: %f ppm", reading.tds);
-    PORT_LOGI("sensor", "pH: %f", reading.ph);
-    PORT_LOGI("sensor", "Transmitindo utilizando LoRa...");
+    PORT_LOGI(TAG, "Temperatura: %f deg C", reading.temperature);
+    PORT_LOGI(TAG, "TDS: %f ppm", reading.tds);
+    PORT_LOGI(TAG, "pH: %f", reading.ph);
 
-    uint8_t buf[3] = { };
-    buf[0] = packet.temperature;
-    buf[1] = packet.tds;
-    buf[2] = packet.ph;
-    assert(g_Phys.transmit(buf, 3) == RADIOLIB_ERR_NONE);
+    if (g_HasLora) {
+        PORT_LOGI(TAG, "Transmitindo utilizando LoRa...");
 
-    PORT_LOGI("sensor", "Transmissão finalizada");
+        auto packet = repr::CompressedReading::compress(reading);
 
+        LoRa.beginPacket();
+        LoRa.write(packet.temperature);
+        LoRa.write(packet.tds);
+        LoRa.write(packet.ph);
+        LoRa.endPacket();
+
+        PORT_LOGI(TAG, "Transmissão finalizada");
+    }
 
     delay(10000);
 }

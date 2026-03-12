@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <esp_timer.h>
+#include <rtc.h>
 
 #include "port/time.hh"
 

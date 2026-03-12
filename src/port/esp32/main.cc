@@ -1,123 +1,93 @@
 #include <Arduino.h>
-#include <Adafruit_ADS1X15.h>
-#include <cstdint>
+#include <stdint.h>
+#include <RadioLib.h>
 #include <esp_task_wdt.h>
 #include <freertos/task.h>
 #include <esp_wifi.h>
 #include <esp_pm.h>
 #include <esp_log.h>
 
-#include "lora/experimental.hh"
-
 #include "sensor/interface.hh"
 #include "sensor/temperature.hh"
 #include "sensor/tds.hh"
 #include "sensor/ph.hh"
+#include "repr/reading.hh"
 
-constexpr auto TAG = "sens";
+#include "gateway.hh"
 
-RTC_DATA_ATTR static struct {
-    enum : uint32_t {
-        //< Canal do ADS conectado ao sensor de temperatura (A0).
-        ADS_CHANNEL_TEMPERATURE = 0,
+constexpr auto TAG = "main";
 
-        //< Canal do ADS conectado ao sensor de pH (A1).
-        ADS_CHANNEL_PH = 1,
+ISR_SAFE_ATTR TaskHandle_t g_GatewayTask;
 
-        //< Canal do ADS conectado ao sensor de TDS (A2).
-        ADS_CHANNEL_TDS = 2,
-    };
+void ISR_SAFE_ATTR isr_notify_gateway() {
+    BaseType_t pxHigherPriorityTaskWoken;
 
-    //< Valores de calibração do sensor de temperatura
-    sensor::NTC10kState temperature {
-        .vref = 5.0f,
-        .offset = 0.0f,
-        .a = 0.0011384f,
-        .b = 0.00023245f,
-        .c = 0.00000009489f,
-    };
-    
-    //< Valores de calibração do sensor de pH
-    sensor::Ph4502cState ph {
-        .a = -5.831f,
-        .b = 22.05f,
-    };
-    
-    //< Valores de calibração do sensor de TDS
-    sensor::TDSMeterState tds {
-        .k = 0.7f,
-    };
+    xTaskNotifyFromISR(
+        g_GatewayTask,
+        0,
+        eNoAction,
+        &pxHigherPriorityTaskWoken
+    );
 
-    /**
-     * @brief Produz uma leitura atual de sensores a partir de uma interface de leitura analógica.
-     * @todo Implementar armazenamento de tempo.
-     */
-    sensor::Reading measure(sensor::AnalogInterface &iface) const noexcept {
-        // Medir e calcular temperatura em graus celsius
-        auto curTemperature = temperature.convert(
-            iface.measure_volts(ADS_CHANNEL_TEMPERATURE)
-        );
+    portYIELD_FROM_ISR(pxHigherPriorityTaskWoken);
+}
 
-        // Medir e calcular TDS em ppm
-        auto curTds = tds.convert(
-            iface.measure_volts(ADS_CHANNEL_TDS),
-            curTemperature
-        );
-
-        // Medir e calcular pH
-        auto curPh = ph.convert(
-            iface.measure_volts(ADS_CHANNEL_PH)
-        );
-
-        return (sensor::Reading) {
-            .time = 123456,
-            .temperature = curTemperature,
-            .tds = curTds,
-            .ph = curPh,
-        };
-    }
-} g_Sensors {};
-
-//< Interface analógica para o ADS1115.
-sensor::ADS1X15Interface g_ADC;
-
-//< Interface para envio de leituras de sensor.
-lora::Protocol *g_Proto = nullptr;
-
-RTC_DATA_ATTR lora::ExperimentalState g_State = { };
+Module g_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
+LORA_RADIO g_Phys = LORA_RADIO(&g_Module);
 
 /**
- * @brief Task do nó sensor.
+ * @brief Task do gateway.
  */
-void task_sensor() {
-    static Module s_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
-    static LORA_RADIO s_Phys = LORA_RADIO(&s_Module);
+void task_gateway() {
+    g_GatewayTask = xTaskGetCurrentTaskHandle();
 
-    // Tentar inicializar I2C do ADS1115
-    if (!Wire.begin(ADS1115_SDA, ADS1115_SCL)) {
-        PORT_LOGW(TAG, "falha ao inicializar o I2C do ADS1X15, leituras não serão realizadas");
-    }
-    // Tentar inicializar ADC externo
-    else if (!g_ADC.begin(Wire)) {
-        PORT_LOGW(TAG, "falha ao inicializar o ADS1X15, leituras não serão realizadas");
-    }
-
+    // Inicializar LoRa
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-    s_Phys.begin(915.0f);
-    s_Phys.forceLDRO(false);
+    assert(g_Phys.begin(915.0f, 125.0f, 11, 5, 0x23, 10, 8) == RADIOLIB_ERR_NONE);
 
-    g_State.id = s_Phys.randomByte();
-    
-    g_Proto = lora::ExperimentalProtocol::create(&s_Phys, g_State);
+    g_Phys.setPacketReceivedAction(isr_notify_gateway);
+
+    // Inicializar gateway
+    gw::setup();
+
+    // Iniciar recepção contínua
+    assert(g_Phys.startReceive(UINT32_MAX) == RADIOLIB_ERR_NONE);
+
+    for (;;) {
+        // Aguardar IRQ
+        assert(xTaskNotifyWait(
+            0,
+            ULONG_MAX,
+            nullptr,
+            pdFALSE
+        ) == pdPASS);
+
+        if (g_Phys.getPacketLength() != 3) {
+            PORT_LOGI(TAG, "received unrecognized packet (len=%u)", g_Phys.getPacketLength());
+            continue;
+        }
+
+        // Ler o pacote comprimido
+        uint8_t buffer[3];
+        assert(g_Phys.readData(buffer, 3) == RADIOLIB_ERR_NONE);
+
+        repr::CompressedReading packet = {
+            .temperature = buffer[0],
+            .tds = buffer[1],
+            .ph = buffer[2],
+        };
+
+        // Descomprimir e enviar o pacote
+        auto reading = packet.decompress();
+        PORT_LOGI(TAG, "received sensor packet (temp=%f degC; tds=%f ppm; ph=%f)", reading.temperature, reading.tds, reading.ph);
+
+        gw::send_reading_firestore(reading);
+    }
 }
 
 //< Função `main` do protótipo
 extern "C" void app_main(void) {
     initArduino();
-
-    if constexpr (STATUS_LED != GPIO_NUM_NC) {
-        pinMode(STATUS_LED, OUTPUT);
-    }
 
     // Definir nível de logs para DEBUG após inicialização
     esp_log_level_set("*", ESP_LOG_DEBUG);
@@ -146,6 +116,6 @@ extern "C" void app_main(void) {
 #endif
     ESP_ERROR_CHECK(esp_pm_configure(&pm_config));
 
-    esp_task_wdt_init(30, true);
-    task_sensor();
+    esp_task_wdt_init(60, true);
+    task_gateway();
 };
