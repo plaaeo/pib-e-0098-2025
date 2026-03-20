@@ -1,0 +1,87 @@
+#pragma once
+
+#include "port/time.hh"
+#include "port/task.hh"
+#include "port/random.hh"
+
+namespace lora {
+    struct TrickleTimerState {
+        uint32_t        counter;
+        uint32_t        redundancy_constant;
+        port::time_us   interval_start_time_us;
+        port::time_us   transmit_delay;
+        port::time_us   min_interval_us;
+        uint8_t         interval_duration_doublings;
+        uint8_t         max_interval_doublings;
+
+        /**
+         * @brief Calcula a duração do intervalo atual em microssegundos.
+         */
+        inline port::time_us calculate_interval_duration() const {
+            return min_interval_us * (1U << interval_duration_doublings);
+        }
+        
+        /**
+         * @brief Calcula o tempo do fim do intervalo atual em microssegundos.
+         */
+        inline port::time_us calculate_interval_end_time() const {
+            return interval_start_time_us + calculate_interval_duration();
+        }
+
+        /**
+         * @brief Calcula um delay `t` aleatório dentro do intervalo [T/2, T).
+         */
+        inline port::time_us calculate_random_transmit_delay() const {
+            auto t = (float)(port::random()) / UINT32_MAX;
+            return calculate_interval_duration() * t;
+        }
+    };
+
+    /**
+     * @brief Implementa o Trickle Timer do RFC 6206
+     */
+    class TrickleTimer {
+    public:
+        TrickleTimer(port::Task *task, TrickleTimerState &state);
+
+        /**
+         * @brief Tenta inicializar o trickle timer. Não faz nada caso ele já esteja executando.
+         * @param redundancy_constant O número de transmissões consistentes necessárias antes do
+         * tempo de transmissão para suprimir a transmissão.
+         * @param min_interval O tamanho mínimo de um intervalo, em microssegundos.
+         * @param max_interval_doublings A quantidade máxima de vezes que o tamanho do intervalo 
+         * pode dobrar.
+         */
+        void try_begin(
+            uint32_t redundancy_constant,
+            port::time_us min_interval,
+            uint8_t max_interval_doublings
+        );
+
+        /**
+         * @brief Interrompe a execução do trickle timer.
+         */
+        void stop();
+
+        /**
+         * @brief Atualiza o estado do timer ao receber uma notificação.
+         * @returns `true` se a transmissão pode ocorrer agora.
+         */
+        bool timed_out();
+
+        /**
+         * @brief Sinaliza o timer de que uma mensagem "consistente" foi recebida.
+         * A definição de "consistente" é dada pelo usuário do trickle timer.
+         */
+        void received_consistent();
+
+        /**
+         * @brief Sinaliza o timer de que uma mensagem "inconsistente" foi recebida.
+         * A definição de "inconsistente" é dada pelo usuário do trickle timer.
+         */
+        void received_inconsistent();
+    private:
+        TrickleTimerState  *m_State;
+        port::NotifyTimer   m_Timer;
+    };
+}

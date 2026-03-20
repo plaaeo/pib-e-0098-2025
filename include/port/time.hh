@@ -39,6 +39,11 @@ namespace port {
          * @brief Inicia o timer com uma duração especificada.
          */
         void start_once(port::time_us duration);
+
+        /**
+         * @returns `true` se o timer estiver executando.
+         */
+        bool is_running();
     
     private:
         void       *m_Inner;

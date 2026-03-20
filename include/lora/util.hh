@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <RadioLib.h>
 
+#include "port/time.hh"
+
 namespace lora {
     /**
      * @brief Bitset utilitário usado para codificar `RadioLibIrqFlag_t` de forma mais
@@ -28,8 +30,13 @@ namespace lora {
         float freq_mhz;
         uint8_t power_db;
         LoRaRate_t dr;
-        uint16_t preambleLength;
-        uint8_t syncWord;
+        uint16_t preamble_length;
+        uint8_t sync_word;
+
+        /**
+         * @brief Calcula o tempo de transmissão de 1 símbolo LoRa nesses parâmetros.
+         */
+        port::time_us calculate_symbol_time() const;
     };
 
     /**
@@ -53,6 +60,11 @@ namespace lora {
     void recv_nonblocking(PhysicalLayer *radio, ReceiveConfig_t rx);
 
     /**
+     * @brief Retorna `true` caso o radiotransmissor esteja recebendo um pacote neste instante.
+     */
+    bool is_receiving(PhysicalLayer *radio);
+
+    /**
      * @brief Inicia uma transmissão em um radiotransmissor sem bloquear a execução da task.
      * @param radio O radiotransmissor a controlar.
      * @param tx Determina como configurar o radiotransmissor para transmissão.
@@ -62,6 +74,7 @@ namespace lora {
     constexpr static uint32_t NOTIFICATION_IRQ = 1 << 0;
     constexpr static uint32_t NOTIFICATION_KILL = 1 << 1;
     constexpr static uint32_t NOTIFICATION_TIMER = 1 << 2;
+    constexpr static uint32_t NOTIFICATION_TRICKLE = 1 << 3;
 
     /**
      * @brief Uma estrutura utilitária para detectar motivos de notificação.

@@ -1,5 +1,45 @@
 #include <assert.h>
 
+namespace port {
+    //< Usado para construir um valor opcional vazio.
+    constexpr struct nullopt_t { } nullopt;
+
+    /**
+     * @brief Uma implementação simples do `std::optional`.
+     */
+    template<typename T>
+    struct optional {
+        inline optional(nullopt_t) : m_Present(false) { };
+        inline explicit optional() : m_Present(false) { };
+        inline explicit optional(T value) : m_Present(true), m_Value(value) { };
+        inline explicit optional(T &&value) : m_Present(true), m_Value(value) { };
+
+        inline bool has_value() const { return m_Present; }
+        inline operator bool() const { return m_Present; }
+        
+        inline const T& const_value() const {
+            assert(m_Present);
+            return m_Value;
+        }
+
+        inline T& value() {
+            assert(m_Present);
+            return m_Value;
+        }
+
+        inline T& operator*() { return value(); }
+        inline const T& operator*() const { return const_value(); }
+        inline T* operator->() { return &(value()); }
+        inline const T* operator->() const { return &(const_value()); }
+    private:
+        union {
+            T   m_Value;
+        };
+
+        bool    m_Present;
+    };
+}
+
 #ifdef ESP32
 #include <hal/gpio_types.h>
 #include <esp_log.h>

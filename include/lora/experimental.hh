@@ -2,6 +2,7 @@
 
 #include <RadioLib.h>
 
+#include "lora/trickle.hh"
 #include "lora/nettime.hh"
 #include "lora/proto.hh"
 #include "lora/util.hh"
@@ -9,7 +10,34 @@
 #include "port/time.hh"
 
 namespace lora {
+    enum class ExperimentalFSM {
+        /**
+         * @brief Valor padrão após a construção inicial da máquina.
+         */
+        INITIALIZED,
+
+        /**
+         * @brief O nó está aguardando por broadcasts de vizinhos.
+         */
+        SCANNING_CANDIDATE_NEIGHBORS,
+
+        /**
+         * @brief O nó está realizando um broadcast.
+         */
+        BROADCASTING,
+    };
+
     struct ExperimentalState {
+        ExperimentalFSM state;
+
+        /**
+         * @brief O estado do último trickle timer executado.
+         */
+        lora::TrickleTimerState trickle;
+
+        /**
+         * @brief Os parâmetros LoRa atuais.
+         */
         lora::Parameters params;
 
         /**
@@ -18,9 +46,15 @@ namespace lora {
         uint8_t id;
 
         /**
-         * @brief O número mínimo de hops para alcançar o gateway.
+         * @brief O rank do nó RPL.
          */
-        uint8_t layer;
+        Rank rank;
+
+        /**
+         * @brief O número de hops necessários para transmitir um dado do nó mais distante
+         * até a raíz da rede. Será 0 caso não seja conhecido.
+         */
+        uint8_t max_hops;
 
         /**
          * @brief Usado para sincronizar o tempo entre os nós sensores.
@@ -54,15 +88,20 @@ namespace lora {
         /**
          * @brief Atualizando o estado atual do protocolo de acordo com um broadcast recebido.
          * @param packet O pacote de broadcast recebido.
-         * @param out Um pacote de broadcast de saída para ser re-transmitido.
-         * @returns `true` caso o pacote colocado em `out` deva ser re-transmitido.
+         * @returns `true` caso o broadcast tenha gerado uma inconsistência, ou seja, tenha
+         * modificado o estado da rede na perspectiva deste nó.
          */
-        bool on_recv_broadcast(const Broadcast &packet, Broadcast &out);
+        bool process_broadcast(const Broadcast &packet);
 
         /**
          * @brief Inicia, executa e finaliza o estado de inicialização do protocolo.
          */
         void do_initialization_stage();
+
+        /**
+         * @brief Avança o estado atual da FSM do protocolo de acordo com um evento externo.
+         */
+        void handle_notification(uint32_t notification);
 
         /**
          * @brief Função principal da task do protocolo experimental.
@@ -78,6 +117,11 @@ namespace lora {
          * que acorda o microcontrolador para cancelar a recepção no momento correto.
          */
         void open_rx_continuous(uint32_t window_ms);
+
+        /**
+         * @brief Espera até poder transmitir novamente.
+         */
+        void wait_until_tx();
 
         /**
          * @brief Aguarda por uma notificação e lida com notificações simples.
@@ -97,5 +141,7 @@ namespace lora {
         port::time_us       m_MonoTimeAtISR_us;
 
         port::NotifyTimer   m_TimeoutTimer;
+
+        lora::TrickleTimer  m_Trickle;
     };    
 }

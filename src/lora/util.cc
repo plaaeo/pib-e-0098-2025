@@ -3,6 +3,10 @@
 #include "lora/util.hh"
 
 namespace lora {
+    port::time_us Parameters::calculate_symbol_time() const {
+        return (1000UL << dr.spreadingFactor) / dr.bandwidth;
+    };
+
     /**
      * @brief Função utilitária usada para converter flags de IRQ do radiotransmissor
      * em um bitset com campos radio-agnósticos.
@@ -46,11 +50,11 @@ namespace lora {
         if (status != RADIOLIB_ERR_NONE)
             PORT_LOGE("lora", "failed to set output power (%hi)", status);
             
-        status = phys->setPreambleLength(params.preambleLength);
+        status = phys->setPreambleLength(params.preamble_length);
         if (status != RADIOLIB_ERR_NONE)
             PORT_LOGE("lora", "failed to set preamble length (%hi)", status);
 
-        status = phys->setSyncWord((uint8_t *) &params.syncWord, 1);
+        status = phys->setSyncWord((uint8_t *) &params.sync_word, 1);
         if (status != RADIOLIB_ERR_NONE)
             PORT_LOGE("lora", "failed to set syncword (%hi)", status);
     }
@@ -79,4 +83,12 @@ namespace lora {
         assert(radio->stageMode(RADIOLIB_RADIO_MODE_TX, &mode) == RADIOLIB_ERR_NONE);
         assert(radio->launchMode() == RADIOLIB_ERR_NONE);
     }
+
+    /**
+     * @brief Retorna `true` caso o radiotransmissor esteja recebendo um pacote neste instante.
+     */
+    bool is_receiving(PhysicalLayer *radio) {
+        auto flags = get_irq_flags(radio);
+        return flags.preamble_detected && flags.header_valid;
+    };
 }

@@ -9,6 +9,15 @@
 #include "lora/util.hh"
 #include "lora/experimental.hh"
 
+//< Constante de redundância do Trickle.
+constexpr static auto TRICKLE_REDUNDANCY_CONSTANT   = 2;
+
+//< Constante que, quando multiplicada com o ToA de um broadcast, dá o intervalo mínimo do Trickle.
+constexpr static auto TRICKLE_MIN_INTERVAL_PACKETS  = 4;
+
+//< Número máximo de vezes que um intervalo pode dobrar no Trickle.
+constexpr static auto TRICKLE_MAX_DOUBLINGS         = 6;
+
 namespace lora {
     constexpr static auto TAG = "proto.experimental";
     static ExperimentalProtocol *g_Instance = nullptr;
@@ -18,6 +27,7 @@ namespace lora {
         , port::Task("experimental-protocol", 2)
         , m_State(state)
         , m_TimeoutTimer(this, NOTIFICATION_TIMER)
+        , m_Trickle(this, state.trickle)
     { };
 
     /**
@@ -38,17 +48,15 @@ namespace lora {
         return false;
     };
 
-    bool ExperimentalProtocol::on_recv_broadcast(const Broadcast &packet, Broadcast &out) {
+    bool ExperimentalProtocol::process_broadcast(const Broadcast &packet) {
         /**
          * @todo Adicionar lógica de salvamento de vizinhos.
          */
 
-        // Caso seja de uma camada maior, não é necessário retransmitir.
-        if (packet.layer > m_State.layer)
-            return false;
+        bool reportInconsistency = false;
 
         // Atualizar fonte de referência do tempo
-        if (m_State.layer == UINT8_MAX) {
+        if (m_State.rank == INFINITE_RANK) {
             /**
              * Ao receber um pacote, um dos delays que contribuem à dessincronização do tempo entre os nós é
              * um pequeno delay de (o que assumo que seja) processamento do sinal por parte do radio. Como esse
@@ -56,7 +64,7 @@ namespace lora {
              * tempo de um símbolo LoRa. Como uma forma de minimizar a influência desse delay na sincronização, removemos
              * o tempo de 1 símbolo do tempo de recepção (IRQ) para aproximar o tempo em que a transmissão realmente finalizou.
              */
-            int64_t symbolTime_us = (1000UL << m_State.params.dr.spreadingFactor) / m_State.params.dr.bandwidth;
+            auto symbolTime_us = m_State.params.calculate_symbol_time();
             auto transmissionEndTime_us = g_Instance->m_MonoTimeAtISR_us - symbolTime_us;
 
             m_State.net_time.synchronize(packet.reference_time_us, transmissionEndTime_us);
@@ -65,123 +73,169 @@ namespace lora {
             PORT_LOGI(TAG, "network time is %llius (reference time was %ius)", m_State.net_time.get_time_us(), packet.reference_time_us);
         }
     
-        m_State.layer = packet.layer + 1;
+        // Caso a distância do nó mais distante tenha mudado, há uma inconsistência.
+        if (packet.max_hops && *packet.max_hops > m_State.max_hops) {
+            m_State.max_hops = *packet.max_hops;
+            reportInconsistency = true;
+        }
 
-        // Retornar broadcast de resposta
-        out = (Broadcast) {
-            .id = m_State.id,
-            .layer = m_State.layer,
-            .reference_time_us = packet.reference_time_us,
-        };
+        // Caso nosso rank tenha mudado, há uma inconsistência.
+        if (packet.rank < m_State.rank) {
+            m_State.rank.hops = packet.rank.hops + 1;
+            reportInconsistency = true;
+        }
 
-        return true;
+        return reportInconsistency;
     };
 
-    void ExperimentalProtocol::do_initialization_stage() {
-        uint8_t buffer[Broadcast::BROADCAST_SIZE] = { };
-        Notification notif;
+    void ExperimentalProtocol::wait_until_tx() {
+        // Calcular um tempo aleatório antes de re-transmitir (evita colisões)
+        uint32_t delay_ms = m_Phys->randomByte();
+        PORT_LOGI(TAG, "waiting %u milliseconds...", delay_ms);
+        vTaskDelay(delay_ms / portTICK_PERIOD_MS);
+    }
 
-        m_State.layer = UINT8_MAX;
-        PORT_LOGI(TAG, "starting broadcast rx session");
+    void ExperimentalProtocol::handle_notification(uint32_t notification) {
+        switch (m_State.state) {
+            case ExperimentalFSM::BROADCASTING:
+                // A mensagem deve ter terminado de transmitir.
+                if (notification & NOTIFICATION_IRQ) {
+                    auto flags = lora::get_irq_flags(m_Phys);
+                    assert(flags.tx_done);
+                    assert(m_Phys->clearIrq(1U << RADIOLIB_IRQ_TX_DONE) == RADIOLIB_ERR_NONE);
+                }
 
-        // Calcular o tempo esperado de transmissão de um broadcast para esse radio
-        int64_t expectedToA_us = m_Phys->getTimeOnAir(Broadcast::BROADCAST_SIZE);
-        PORT_LOGI(TAG, "expected time on air is %llu microseconds", expectedToA_us);
+                [[fallthrough]];
+            case ExperimentalFSM::INITIALIZED: {
+                PORT_LOGI(TAG, "starting broadcast rx session");
 
-        do {
-            // Iniciar recepção sem timeout
-            lora::recv_nonblocking(m_Phys, {
-                .timeout = 0,
-                .irqFlags = RADIOLIB_IRQ_RX_DEFAULT_FLAGS,
-                .irqMask = 1U << RADIOLIB_IRQ_RX_DONE,
-                .len = 0,
-            });
-            
-            notif = await(NOTIFICATION_IRQ | NOTIFICATION_TIMER);            
-            
-            auto flags = lora::get_irq_flags(m_Phys);
-            if (!notif.irq || !flags.rx_done) {
-                PORT_LOGI(TAG, "interrupted without rx done");
-                continue;
-            }
-            
-            // Verificar se a recepção teve sucesso
-            if (flags.crc_err || flags.header_err || flags.timeout) {
-                PORT_LOGI(TAG, "received failed broadcast");
-                continue;
-            }
+                // Iniciar recepção sem timeout
+                lora::recv_nonblocking(m_Phys, {
+                    .timeout = UINT32_MAX,
+                    .irqFlags = RADIOLIB_IRQ_RX_DEFAULT_FLAGS,
+                    .irqMask = 1U << RADIOLIB_IRQ_RX_DONE,
+                    .len = 0,
+                });
 
-            // Verificar se o pacote tem o tamanho correto
-            auto length = m_Phys->getPacketLength();
-            if (length != Broadcast::BROADCAST_SIZE) {
-                PORT_LOGI(TAG, "received broadcast with wrong length");
-                continue;
-            }
+                m_State.state = ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS;
+            }; break;
 
-            // Ler e decodificar broadcast
-            assert(m_Phys->readData(buffer, sizeof(buffer)) == RADIOLIB_ERR_NONE);
-            
-            Broadcast packet;
-            if (!Broadcast::decode(buffer, length, packet)) {
-                PORT_LOGI(TAG, "broadcast was invalid");
-                continue;
-            }
-            
-            PORT_LOGI(TAG, "broadcast from ID %hhu, layer %hhu (rrsi=%f, snr=%f)", packet.id, packet.layer, m_Phys->getRSSI(), m_Phys->getSNR());
-            
-            // Atualizar estado e verificar necessidade de retransmissão
-            auto response = on_recv_broadcast(packet, packet);
-            if (!response)
-                continue;
-             
-            // Calcular um tempo aleatório antes de re-transmitir (evita colisões)
-            uint32_t delay_ms = m_Phys->randomByte();
-            PORT_LOGI(TAG, "waiting %u milliseconds...", delay_ms);
-            vTaskDelay(delay_ms / portTICK_PERIOD_MS);
-            
-            /**
-             * Atualizar o tempo de referência no broadcast para refletir o tempo
-             * de processamento do pacote e o tempo esperado de transmissão.
-             * 
-             * Isso não garante sincronia com o próximo nó. Há um pequeno erro acumulado em cada
-             * retransmissão equivalente a:
-             * - O tempo de codificar o broadcast em um pacote;
-             * - O tempo de comunicar com o radiotransmissor o pacote a ser enviado;
-             * - O tempo de comunicar o radiotransmissor a iniciar a transmissão;
-             * - O tempo do radiotransmissor realmente iniciar a transmissão.
-             * Após a recepcão do próximo nó, ainda há um pequeno delay não deterministico de processamento
-             * necessário para o radiotransmissor conseguir demodular o pacote e corrigir erros.
-             */
-            packet.reference_time_us = static_cast<int32_t>(
-                m_State.net_time.get_time_us() + expectedToA_us
-            );
+            case ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS: {
+                // Uma mensagem pode ter sido recebida.
+                if (notification & NOTIFICATION_IRQ) {
+                    auto flags = lora::get_irq_flags(m_Phys);
 
-            assert(packet.encode(buffer, sizeof(buffer)));
+                    // Caso seja `false`, o radio foi utilizado por outro código além deste.
+                    assert(flags.rx_done);
 
-            // Realizar a retransmissão
-            lora::send_nonblocking(m_Phys, {
-                .data = buffer,
-                .len = Broadcast::BROADCAST_SIZE,
-                .addr = 0,
-            });
-            
-            // Aguardar fim da transmissão.
-            notif = await(NOTIFICATION_IRQ | NOTIFICATION_TIMER);
-            flags = lora::get_irq_flags(m_Phys);
-            assert(notif.irq && flags.tx_done);
+                    // Limpar flags de IRQ
+                    assert(m_Phys->clearIrq(RADIOLIB_IRQ_RX_DEFAULT_FLAGS) == RADIOLIB_ERR_NONE);
 
-            PORT_LOGI(TAG, "retransmitted broadcast");
+                    auto length = m_Phys->getPacketLength();
 
-            // Reiniciar timeout para 8 * o delay aleatório máximo
-            m_TimeoutTimer.stop();
-            m_TimeoutTimer.start_once(UINT8_MAX * 1000U * 8U);
-        } while (!notif.timer);
+                    // Verificar se a recepção teve sucesso
+                    if (
+                        flags.crc_err
+                        || flags.header_err
+                        || flags.timeout
+                        || length > Broadcast::BROADCAST_MAX_SIZE
+                    ) {
+                        PORT_LOGI(TAG, "received broadcast with errors");
+                        return;
+                    }
 
-        m_TimeoutTimer.stop();
-        PORT_LOGI(TAG, "ended broadcast rx session, I'm ID %hhu at layer %hhu", m_State.id, m_State.layer);
+                    // Obter métricas de qualidade do pacote
+                    float rssi = m_Phys->getRSSI();
+                    float snr = m_Phys->getSNR();
 
-        assert(m_Phys->finishReceive() == RADIOLIB_ERR_NONE);
+                    // Ler broadcast do radio
+                    uint8_t buffer[Broadcast::BROADCAST_MAX_SIZE];
+                    assert(m_Phys->readData(buffer, sizeof(buffer)) == RADIOLIB_ERR_NONE);
+                    
+                    // Tentar decodificar o pacote do broadcast
+                    auto packet = Broadcast::decode(buffer, length);
+                    if (!packet) {
+                        PORT_LOGI(TAG, "broadcast was invalid");
+                        return;
+                    }
+
+                    PORT_LOGI(TAG, "broadcast from ID %hhu, rank %hhu.%hhu (rrsi=%f, snr=%f)",
+                              packet->id, packet->rank.hops, packet->rank.tiredness, rssi, snr);
+
+                    // Reportar inconsistência caso o estado mude
+                    if (process_broadcast(*packet))
+                        m_Trickle.received_inconsistent();
+
+                    // Iniciar o trickle caso ele ainda não esteja iniciado.
+                    m_Trickle.try_begin(
+                        TRICKLE_REDUNDANCY_CONSTANT,
+                        TRICKLE_MIN_INTERVAL_PACKETS * m_Phys->getTimeOnAir(Broadcast::BROADCAST_MAX_SIZE),
+                        TRICKLE_MAX_DOUBLINGS
+                    );
+                }
+
+                // Caso o Trickle Timer tenha finalizado, talvez seja possível transmitir nosso broadcast.
+                if (notification & NOTIFICATION_TRICKLE) {
+                    if (!m_Trickle.timed_out())
+                        return;
+                    
+                    /**
+                     * Não há necessidade de cancelar uma recepção para iniciar uma transmissão, pois
+                     * nós vizinhos terão dificuldade de ouvir este broadcast, e adicionar uma transmissão
+                     * apenas poluiria o canal.
+                     */
+                    if (lora::is_receiving(m_Phys)) {
+                        PORT_LOGI(TAG, "suppressed broadcast due to channel occupation");
+                        return;
+                    }
+                    
+                    Broadcast broadcast = {
+                        .reference_time_us = m_State.net_time.get_time_us(),
+                        .id = m_State.id,
+                        .rank = m_State.rank,
+                        .max_hops = (
+                            m_State.max_hops == 0
+                            ? port::nullopt
+                            : port::optional<uint8_t>(m_State.max_hops)
+                        )
+                    };
+
+                    /**
+                     * @todo Se o Trickle estiver executando um intervalo máximo, e nenhum nó filho foi detectado 
+                     * até agora, anunciar `max_hops` como `m_State.rank.hops`, e definir `m_State.max_hops` igualmente.
+                     * O resto da operação é idêntica à qualquer outro nó.
+                     */
+                    
+                    /**
+                     * Atualizar o tempo de referência no broadcast para refletir o tempo
+                     * de processamento do pacote e o tempo esperado de transmissão.
+                     * 
+                     * Isso não garante sincronia com o próximo nó. Há um pequeno erro acumulado em cada
+                     * retransmissão equivalente a:
+                     * - O tempo de codificar o broadcast em um pacote;
+                     * - O tempo de comunicar com o radiotransmissor o pacote a ser enviado;
+                     * - O tempo de comunicar o radiotransmissor a iniciar a transmissão;
+                     * - O tempo do radiotransmissor realmente iniciar a transmissão.
+                     * Após a recepcão do próximo nó, ainda há um pequeno delay não deterministico de processamento
+                     * necessário para o radiotransmissor conseguir demodular o pacote e corrigir erros.
+                     */
+                    size_t length = broadcast.length();
+                    broadcast.reference_time_us += m_Phys->getTimeOnAir(length);
+                    
+                    // Codificar o buffer
+                    uint8_t buffer[length];
+                    assert(broadcast.encode(buffer, length));
+
+                    // Realizar a retransmissão
+                    lora::send_nonblocking(m_Phys, { .data = buffer, .len = length, .addr = 0 });
+                    PORT_LOGI(TAG, "sending unsuppressed broadcast (max_hops = %hhu)", m_State.max_hops);
+
+                    m_State.state = ExperimentalFSM::BROADCASTING;
+                }
+            }; break;
+        }
     };
+
 
     /**
      * @brief Função principal da task do protocolo experimental.
@@ -200,8 +254,8 @@ namespace lora {
                 .bandwidth = 125.f,
                 .codingRate = 5,
             },
-            .preambleLength = 12,
-            .syncWord = 0x77
+            .preamble_length = 12,
+            .sync_word = 0x77
         };
 
         // Configurar parâmetros iniciais conhecidos padrão
@@ -214,33 +268,11 @@ namespace lora {
             .addr = 0,
         });
 
-        await(NOTIFICATION_IRQ);
+        uint32_t notification = 0;
 
-        do_initialization_stage();
-
-        auto nextTimerTime_us = 2000000LL;
-
-        uint32_t ledState = 0;
-        for (;;) {
-            nextTimerTime_us += 1000000LL;
-            m_TimeoutTimer.start_once(nextTimerTime_us - m_State.net_time.get_time_us());
-
-            // if constexpr (STATUS_LED != GPIO_NUM_NC) {
-            //     ledState = (ledState > 0) ? 0 : 1;
-            //     gpio_hold_dis(STATUS_LED);
-            //     gpio_set_level(STATUS_LED, ledState);
-            //     gpio_hold_en(STATUS_LED);
-            // }
-            
-            await(NOTIFICATION_TIMER);
-            auto time_us = m_State.net_time.get_time_us();
-            auto drift_us = time_us - nextTimerTime_us;
-            char driftSign = '+';
-            if (drift_us < 0) {
-                driftSign = '-';
-                drift_us = -drift_us;
-            }
-            PORT_LOGI(TAG, "current time is: %lli.%06llis after broadcast (drifted %c%lli.%06lli)", time_us / 1000000, time_us % 1000000LL, driftSign, drift_us / 1000000, drift_us % 1000000LL);
+        for ( ;; ) {
+            handle_notification(notification);
+            notification = port::await_notification();
         }
     }
 

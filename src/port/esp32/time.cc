@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <esp_timer.h>
+#include <rtc.h>
 
 #include "port/time.hh"
 
@@ -63,5 +64,11 @@ namespace port {
             static_cast<esp_timer_handle_t>(m_Inner),
             duration_us
         ));
+    };
+
+    bool NotifyTimer::is_running() {
+        return esp_timer_is_active(
+            static_cast<esp_timer_handle_t>(m_Inner)
+        );
     };
 }
