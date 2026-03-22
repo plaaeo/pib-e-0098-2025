@@ -4,12 +4,12 @@
 
 #include "port/time.hh"
 
-namespace lora {
+namespace net {
     /**
      * @brief Utilitário usado para contar o tempo na rede com precisão.
      * Usa um RTC como fonte de tempo precisa.
      */
-    struct NetworkTimer {
+    struct Clock {
         port::time_us network_time_offset_us;
 
         /**

@@ -24,74 +24,32 @@ constexpr static auto TDM_SUBSLOT_COUNT             = 1;
 constexpr static auto TDM_SLOT_COUNT                = 4;
 
 namespace lora {
+    constexpr static uint32_t NOTIFICATION_IRQ = 1 << 0;
+    constexpr static uint32_t NOTIFICATION_KILL = 1 << 1;
+    constexpr static uint32_t NOTIFICATION_TIMER = 1 << 2;
+    constexpr static uint32_t NOTIFICATION_TRICKLE = 1 << 3;
+
     constexpr static auto TAG = "proto.experimental";
     static ExperimentalProtocol *g_Instance = nullptr;
 
-    void CandidateParents::clear() {
-        candidate_parents.clear();
-    };
-
-    void CandidateParents::add_or_update(ParentInfo &&info) {
-        // Buscar potencial pai no vetor `candidate_parents`
-        for (size_t i = 0; i < candidate_parents.size(); i++) {
-            // Atualizar caso tenhamos encontrado o pai
-            if (candidate_parents[i].id == info.id) {
-                candidate_parents.assign(info, i);
-                return;
-            }
-        }
-                
-        // Tentar inserir no vetor, caso não seja possível, substituir o pior pai
-        if (!candidate_parents.push_back(info)) {
-            size_t worstIndex = SIZE_MAX;
-            uint32_t worstScore = info.score();
-
-            // Buscar pai com pior pontuação
-            for (size_t i = 0; i < candidate_parents.size(); i++) {
-                uint32_t score = candidate_parents[i].score();
-                if (score < worstScore) {
-                    worstIndex = i;
-                    worstScore = score;
-                }
-            }
-
-            // Descartar pai novo
-            if (worstIndex == SIZE_MAX) {
-                PORT_LOGI(TAG, "discarding low-quality parent %hhu (new)", info.id);
-                return;
-            }
-
-            // Descartar pai antigo
-            PORT_LOGI(TAG, "discarding low-quality parent %hhu for %hhu", candidate_parents[worstIndex].id, info.id);
-            candidate_parents.assign(info, worstIndex);
-        }
-    };
-    
-    static int compare_parent_info(const void *a, const void *b) {
-        return static_cast<const ParentInfo*>(a)->score() - static_cast<const ParentInfo*>(b)->score();
-    };
-
-    port::optional<uint8_t> CandidateParents::sort_by_objective() {
-        if (candidate_parents.size() == 0)
-            return port::nullopt;
-
-        // Ordenar usando quicksort
-        qsort(
-            candidate_parents.data(),
-            candidate_parents.size(),
-            sizeof(ParentInfo),
-            compare_parent_info
-        );
-
-        return port::optional<uint8_t>(candidate_parents[0].id);
-    };
-
-    ExperimentalProtocol::ExperimentalProtocol(PhysicalLayer *phys, ExperimentalState &state)
+    ExperimentalProtocol::ExperimentalProtocol(PhysicalLayer *phys, State &state)
         : Protocol(phys)
         , port::Task("experimental-protocol", 2)
         , m_State(state)
+        , m_Params({
+            .freq_mhz = 915.0f,
+            .power_db = 5,
+            .dr = {
+                .spreadingFactor = 12,
+                .bandwidth = 125.f,
+                .codingRate = 5,
+            },
+            .preamble_length = 12,
+            .sync_word = 0x77
+        })
+        , m_MonoTimeAtISR_us(0)
         , m_TimeoutTimer(this, NOTIFICATION_TIMER)
-        , m_Trickle(this, state.trickle)
+        , m_Trickle(this, NOTIFICATION_TRICKLE, state.trickle)
     { };
 
     /**
@@ -101,7 +59,7 @@ namespace lora {
      * a qualquer momento da execução.
      * @returns A instância criada, ou `nullptr` caso já exista outra instância.
      */
-    ExperimentalProtocol *ExperimentalProtocol::create(PhysicalLayer *phys, ExperimentalState &state) {
+    ExperimentalProtocol *ExperimentalProtocol::create(PhysicalLayer *phys, State &state) {
         if (g_Instance) return nullptr;
 
         g_Instance = new ExperimentalProtocol(phys, state);
@@ -112,11 +70,11 @@ namespace lora {
         return false;
     };
 
-    bool ExperimentalProtocol::process_broadcast(const Broadcast &packet) {
+    bool ExperimentalProtocol::process_broadcast(const net::Broadcast &packet) {
         bool reportInconsistency = false;
 
         // Atualizar fonte de referência do tempo ao receber o primeiro broadcast.
-        if (m_State.rank == INFINITE_RANK) {
+        if (m_State.rank == net::INFINITE_RANK) {
             /**
              * Ao receber um pacote, um dos delays que contribuem à dessincronização do tempo entre os nós é
              * um pequeno delay de (o que assumo que seja) processamento do sinal por parte do radio. Como esse
@@ -124,7 +82,7 @@ namespace lora {
              * tempo de um símbolo LoRa. Como uma forma de minimizar a influência desse delay na sincronização, removemos
              * o tempo de 1 símbolo do tempo de recepção (IRQ) para aproximar o tempo em que a transmissão realmente finalizou.
              */
-            auto symbolTime_us = m_State.params.calculate_symbol_time();
+            auto symbolTime_us = m_Params.calculate_symbol_time();
             auto transmissionEndTime_us = g_Instance->m_MonoTimeAtISR_us - symbolTime_us;
 
             m_State.net_time.synchronize(packet.reference_time_us, transmissionEndTime_us);
@@ -134,14 +92,14 @@ namespace lora {
         }
     
         // Caso a distância do nó mais distante tenha mudado, há uma inconsistência.
-        if (packet.max_hops && *packet.max_hops > m_State.max_hops) {
-            PORT_LOGI(TAG, "upgraded max_hops from %hhu -> %hhu", m_State.max_hops, *packet.max_hops);
-            m_State.max_hops = *packet.max_hops;
+        if (packet.max_hops != net::UNKNOWN_MAX_HOPS && packet.max_hops > m_State.max_hops) {
+            PORT_LOGI(TAG, "upgraded max_hops from %hhu -> %hhu", m_State.max_hops, packet.max_hops);
+            m_State.max_hops = packet.max_hops;
             reportInconsistency = true;
         }
 
         // Caso nosso rank tenha mudado, há uma inconsistência.
-        if (m_State.rank == INFINITE_RANK || m_State.rank.hops > (packet.rank.hops + 1)) {
+        if (m_State.rank == net::INFINITE_RANK || m_State.rank.hops > (packet.rank.hops + 1)) {
             auto old = m_State.rank;
 
             // Todos os pais serão invalidados, pois nosso rank agora é igual ou menor que o rank deles,
@@ -175,7 +133,7 @@ namespace lora {
     void ExperimentalProtocol::wait_for_slot() {
         // A duração de um slot completo
         port::time_us slotDuration = m_Phys->getTimeOnAir(TDM_SUBSLOT_MTU_BYTES);
-        slotDuration += TDM_SUBSLOT_COUNT * TDM_SUBSLOT_GUARD_SYMBOLS * m_State.params.calculate_symbol_time();
+        slotDuration += TDM_SUBSLOT_COUNT * TDM_SUBSLOT_GUARD_SYMBOLS * m_Params.calculate_symbol_time();
         
         // A duração de uma contagem monotônica de slots até a contagem reiniciar
         port::time_us frameDuration = slotDuration * TDM_SLOT_COUNT;
@@ -207,7 +165,7 @@ namespace lora {
             flags.crc_err
             || flags.header_err
             || flags.timeout
-            || length > Broadcast::BROADCAST_MAX_SIZE
+            || length > net::Broadcast::BROADCAST_MAX_SIZE
         ) {
             PORT_LOGW(TAG, "received broadcast with errors");
             return;
@@ -218,11 +176,11 @@ namespace lora {
         float snr = m_Phys->getSNR();
 
         // Ler broadcast do radio
-        uint8_t buffer[Broadcast::BROADCAST_MAX_SIZE];
+        uint8_t buffer[net::Broadcast::BROADCAST_MAX_SIZE];
         assert(m_Phys->readData(buffer, sizeof(buffer)) == RADIOLIB_ERR_NONE);
         
         // Tentar decodificar o pacote do broadcast
-        auto packet = Broadcast::decode(buffer, length);
+        auto packet = net::Broadcast::decode(buffer, length);
         if (!packet) {
             PORT_LOGW(TAG, "broadcast was invalid");
             return;
@@ -232,13 +190,13 @@ namespace lora {
                     packet->id, static_cast<uint8_t>(packet->rank), rssi, snr);
 
         // Reportar inconsistência caso o estado mude
-        if (process_broadcast(*packet)) m_Trickle.received_inconsistent();
-        else m_Trickle.received_consistent();
+        if (process_broadcast(*packet)) m_Trickle.signal_inconsistency();
+        else m_Trickle.signal_consistency();
 
         // Iniciar o trickle caso ele ainda não esteja iniciado.
         m_Trickle.try_begin(
             TRICKLE_REDUNDANCY_CONSTANT,
-            TRICKLE_MIN_INTERVAL_PACKETS * m_Phys->getTimeOnAir(Broadcast::BROADCAST_MAX_SIZE),
+            TRICKLE_MIN_INTERVAL_PACKETS * m_Phys->getTimeOnAir(net::Broadcast::BROADCAST_MAX_SIZE),
             TRICKLE_MAX_DOUBLINGS
         );
     }
@@ -286,7 +244,7 @@ namespace lora {
                 // Caso o Trickle Timer tenha finalizado, talvez seja possível transmitir nosso broadcast.
                 if (notification & NOTIFICATION_TRICKLE) {
                     notification ^= NOTIFICATION_TRICKLE;
-                    if (!m_Trickle.timed_out())
+                    if (!m_Trickle.update_and_check())
                         return ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS;
 
                     /**
@@ -305,23 +263,19 @@ namespace lora {
                      */
                     if (
                         !m_State.has_children
-                        && m_State.max_hops == 0
+                        && m_State.max_hops == net::UNKNOWN_MAX_HOPS
                         && m_State.trickle.interval_duration_doublings == m_State.trickle.max_interval_doublings
                     ) {
                         m_State.max_hops = m_State.rank.hops;
                         PORT_LOGI(TAG, "adopted initial guess for max_hops as %hhu", m_State.max_hops);
-                        m_Trickle.received_inconsistent();
+                        m_Trickle.signal_inconsistency();
                     }
                     
-                    Broadcast broadcast = {
+                    net::Broadcast broadcast = {
                         .reference_time_us = static_cast<int32_t>(m_State.net_time.get_time_us()),
                         .id = m_State.id,
                         .rank = m_State.rank,
-                        .max_hops = (
-                            m_State.max_hops == 0
-                            ? port::nullopt
-                            : port::optional<uint8_t>(m_State.max_hops)
-                        )
+                        .max_hops = m_State.max_hops,
                     };
 
                     /**
@@ -350,7 +304,7 @@ namespace lora {
 
                     // Após o trickle atingir o intervalo máximo, assumimos que a rede está estável, mas apenas se soubermos `max_hops`.
                     if (
-                        m_State.max_hops != 0
+                        m_State.max_hops != net::UNKNOWN_MAX_HOPS
                         && m_State.trickle.interval_duration_doublings == m_State.trickle.max_interval_doublings
                     ) {
                         PORT_LOGI(TAG, "network is stable");
@@ -400,20 +354,8 @@ namespace lora {
         m_Phys->setPacketReceivedAction(ExperimentalProtocol::isr_notify_task);
         m_Phys->setChannelScanAction(ExperimentalProtocol::isr_notify_task);
 
-        m_State.params = {
-            .freq_mhz = 915.0f,
-            .power_db = 5,
-            .dr = {
-                .spreadingFactor = 12,
-                .bandwidth = 125.f,
-                .codingRate = 5,
-            },
-            .preamble_length = 12,
-            .sync_word = 0x77
-        };
-
         // Configurar parâmetros iniciais conhecidos padrão
-        lora::set_phy_parameters(m_Phys, m_State.params);
+        lora::set_phy_parameters(m_Phys, m_Params);
 
         // Transmitir mensagem falsa de início de broadcast
         lora::send_nonblocking(m_Phys, {
@@ -431,85 +373,6 @@ namespace lora {
             notification |= port::await_notification();
         }
     }
-
-    void ExperimentalProtocol::open_rx_continuous(uint32_t window_ms) {
-        Notification notif;
-        lora::IRQFields flags;
-        
-        // Configuração do modo RX
-        RadioModeConfig_t cfg = (RadioModeConfig_t) {
-            .receive = {
-                .timeout = UINT32_MAX,
-                .irqFlags = RADIOLIB_IRQ_RX_DEFAULT_FLAGS,
-                .irqMask = RADIOLIB_IRQ_RX_DEFAULT_MASK,
-                .len = 0,
-            },
-        };
-
-        PORT_LOGI(TAG, "opening rx window for %ums", window_ms);
-
-        m_TimeoutTimer.start_once(window_ms * 1000);
-
-        do {
-            // Iniciar recepção contínua
-            m_Phys->stageMode(RADIOLIB_RADIO_MODE_RX, &cfg);
-            m_Phys->launchMode();
-            
-            // Aguardar por IRQs ou a notificação do timer
-            notif = await();
-
-            if (notif.irq) {
-                flags = lora::get_irq_flags(m_Phys);
-
-                PORT_LOGD(TAG, "ExperimentalProtocol::await_phys_irq() {");
-                PORT_LOGD(TAG, "\t.tx_done = %u", flags.tx_done);
-                PORT_LOGD(TAG, "\t.rx_done = %u", flags.rx_done);
-                PORT_LOGD(TAG, "\t.preamble_detected = %u", flags.preamble_detected);
-                PORT_LOGD(TAG, "\t.sync_word_valid = %u", flags.sync_word_valid);
-                PORT_LOGD(TAG, "\t.header_valid = %u", flags.header_valid);
-                PORT_LOGD(TAG, "\t.header_err = %u", flags.header_err);
-                PORT_LOGD(TAG, "\t.crc_err = %u", flags.crc_err);
-                PORT_LOGD(TAG, "\t.cad_done = %u", flags.cad_done);
-                PORT_LOGD(TAG, "\t.cad_detected = %u", flags.cad_detected);
-                PORT_LOGD(TAG, "\t.timeout = %u", flags.timeout);
-                PORT_LOGD(TAG, "}");
-
-                /** @todo Lidar com recepções */
-    
-                m_Phys->clearIrq(RADIOLIB_IRQ_RX_DEFAULT_FLAGS);
-            }
-            
-        } while (!flags.timeout && !notif.timer);
-
-        // Finalizar recepção
-        m_Phys->finishReceive();
-        PORT_LOGI(TAG, "closing rx window");
-    }
-
-    Notification ExperimentalProtocol::await(uint32_t mask) {
-#if !defined(NDEBUG) && defined(ESP32) && ESP32
-        // Sincronizar logs caso seja uma build de debug
-        fflush(stdout);
-        fsync(fileno(stdout));
-#endif
-
-        uint32_t notification = 0;
-        
-        do {
-            notification = port::await_notification();
-
-            if (notification & NOTIFICATION_KILL) {
-                /** @todo Receber notificações KILL */
-                PORT_LOGE(TAG, "ordered to kill ExperimentalProtocol task");
-                notification ^= NOTIFICATION_KILL;
-            }
-        } while ((notification & mask) == 0);
-
-        return (Notification) {
-            .irq    = 0 != (notification & NOTIFICATION_IRQ),
-            .timer  = 0 != (notification & NOTIFICATION_TIMER),
-        };
-    };
 
     /**
      * @brief ISR que notifica a task do protocolo experimental.

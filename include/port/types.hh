@@ -10,6 +10,7 @@ namespace port {
     /**
      * @brief Uma implementação simples do `std::optional`.
      * @warning T deve ser uma estrutura simples (veja https://en.cppreference.com/w/cpp/language/classes.html#Standard-layout_class)
+     * @todo Testar todas as funcionalidades
      */
     template<typename T>
     struct optional {
@@ -44,6 +45,7 @@ namespace port {
     /**
      * @brief Implementação simples de um vetor de capacidade fixa.
      * @warning T deve ser uma estrutura simples (veja https://en.cppreference.com/w/cpp/language/classes.html#Standard-layout_class)
+     * @todo Testar todas as funcionalidades
      */
     template<typename T, size_t Capacity>
     struct static_vector {

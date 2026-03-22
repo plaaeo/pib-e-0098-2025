@@ -1,12 +1,12 @@
-#include "lora/trickle.hh"
+#include "net/trickle.hh"
 #include "lora/util.hh"
 
-namespace lora {
+namespace net {
     constexpr static auto TAG = "trickle";
 
-    TrickleTimer::TrickleTimer(port::Task *task, TrickleTimerState &state)
+    TrickleTimer::TrickleTimer(port::Task *task, uint32_t notification, TrickleTimerState &state)
         : m_State(&state)
-        , m_Timer(task, NOTIFICATION_TRICKLE)
+        , m_Timer(task, notification)
         , m_Running(false)
     { };
 
@@ -48,7 +48,7 @@ namespace lora {
         m_Running = false;
     };
 
-    bool TrickleTimer::timed_out() {
+    bool TrickleTimer::update_and_check() {
         if (m_State == nullptr || !m_Running) return false;
     
         // Verificar se o timeout ocorreu no tempo `t`
@@ -82,12 +82,12 @@ namespace lora {
         return false;
     };
 
-    void TrickleTimer::received_consistent() {
+    void TrickleTimer::signal_consistency() {
         if (m_State != nullptr)
             m_State->counter++;
     };
 
-    void TrickleTimer::received_inconsistent() {
+    void TrickleTimer::signal_inconsistency() {
         /**
          * 6.  If Trickle hears a transmission that is "inconsistent" and I is
          *     greater than Imin, it resets the Trickle timer.  To reset the

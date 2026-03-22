@@ -70,17 +70,4 @@ namespace lora {
      * @param tx Determina como configurar o radiotransmissor para transmissão.
      */
     void send_nonblocking(PhysicalLayer *radio, TransmitConfig_t tx);
-
-    constexpr static uint32_t NOTIFICATION_IRQ = 1 << 0;
-    constexpr static uint32_t NOTIFICATION_KILL = 1 << 1;
-    constexpr static uint32_t NOTIFICATION_TIMER = 1 << 2;
-    constexpr static uint32_t NOTIFICATION_TRICKLE = 1 << 3;
-
-    /**
-     * @brief Uma estrutura utilitária para detectar motivos de notificação.
-     */
-    struct Notification {
-        uint32_t irq : 1;
-        uint32_t timer : 1;
-    };
 }

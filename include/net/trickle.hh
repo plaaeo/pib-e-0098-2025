@@ -4,7 +4,7 @@
 #include "port/task.hh"
 #include "port/random.hh"
 
-namespace lora {
+namespace net {
     struct TrickleTimerState {
         uint32_t        counter;
         uint32_t        redundancy_constant;
@@ -17,14 +17,14 @@ namespace lora {
         /**
          * @brief Calcula a duração do intervalo atual em microssegundos.
          */
-        inline port::time_us calculate_interval_duration() const {
+        constexpr port::time_us calculate_interval_duration() const {
             return min_interval_us * (1U << interval_duration_doublings);
         }
         
         /**
          * @brief Calcula o tempo do fim do intervalo atual em microssegundos.
          */
-        inline port::time_us calculate_interval_end_time() const {
+        constexpr port::time_us calculate_interval_end_time() const {
             return interval_start_time_us + calculate_interval_duration();
         }
 
@@ -42,7 +42,7 @@ namespace lora {
      */
     class TrickleTimer {
     public:
-        TrickleTimer(port::Task *task, TrickleTimerState &state);
+        TrickleTimer(port::Task *task, uint32_t notification, TrickleTimerState &state);
 
         /**
          * @brief Tenta inicializar o trickle timer. Não faz nada caso ele já esteja executando.
@@ -64,22 +64,24 @@ namespace lora {
         void stop();
 
         /**
-         * @brief Atualiza o estado do timer ao receber uma notificação.
+         * @brief Atualiza o estado do timer ao receber uma notificação e verifica se, neste instante,
+         * o nó deve ou não transmitir.
+         * @warning É necessário chamar esta função sempre após uma notificação do trickle.
          * @returns `true` se a transmissão pode ocorrer agora.
          */
-        bool timed_out();
+        bool update_and_check();
 
         /**
          * @brief Sinaliza o timer de que uma mensagem "consistente" foi recebida.
          * A definição de "consistente" é dada pelo usuário do trickle timer.
          */
-        void received_consistent();
+        void signal_consistency();
 
         /**
          * @brief Sinaliza o timer de que uma mensagem "inconsistente" foi recebida.
          * A definição de "inconsistente" é dada pelo usuário do trickle timer.
          */
-        void received_inconsistent();
+        void signal_inconsistency();
     private:
         TrickleTimerState  *m_State;
         port::NotifyTimer   m_Timer;

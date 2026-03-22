@@ -1,6 +1,6 @@
-#include "lora/proto.hh"
+#include "net/packets.hh"
 
-namespace lora {
+namespace net {
     size_t Broadcast::length() const {
         if (max_hops) return BROADCAST_MAX_SIZE;
         return BROADCAST_MAX_SIZE - 1;
@@ -17,11 +17,11 @@ namespace lora {
         out.reference_time_us = (out.reference_time_us << 8) | buffer[3];
         out.reference_time_us = (out.reference_time_us << 8) | buffer[4];
         out.reference_time_us = (out.reference_time_us << 8) | buffer[5];
-        out.max_hops = port::nullopt;
+        out.max_hops = net::UNKNOWN_MAX_HOPS;
         
         // Decodificar `max_hops` caso presente
         if (length == BROADCAST_MAX_SIZE)
-            out.max_hops = port::optional<uint8_t>(buffer[6]);
+            out.max_hops = buffer[6];
         
         return port::optional<Broadcast>(out);
     }
@@ -36,10 +36,10 @@ namespace lora {
         buffer[3] = (reference_time_us >> 16) & 0xFF;
         buffer[4] = (reference_time_us >> 8 ) & 0xFF;
         buffer[5] = reference_time_us & 0xFF;
-    
+        
         // Codificar `max_hops` caso presente
-        if (max_hops) {
-            buffer[6] = max_hops.value();
+        if (max_hops == net::UNKNOWN_MAX_HOPS) {
+            buffer[6] = max_hops;
             return BROADCAST_MAX_SIZE;
         }
 
