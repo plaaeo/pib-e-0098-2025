@@ -25,6 +25,65 @@ namespace lora {
          * @brief O nó está realizando um broadcast.
          */
         BROADCASTING,
+
+        /**
+         * @todo Implementar os próximos estados reais da rede.
+         */
+        EXECUTING,
+    };
+
+    /**
+     * @brief Representa as informações de um vizinho potencialmente pai
+     * do nó. Atualizado apenas durante a fase de inicialização.
+     */
+    struct ParentInfo {
+        float last_rssi;
+        float last_snr;
+        uint8_t id;
+        Rank rank;
+
+        inline uint32_t score() const {
+            /**
+             * Shifta o inverso do 'cansaço' do nó por 15. Faz com que 1 bit do valor
+             * 'cansaço' sobreponha o score do RSSI. Desta forma, um nó que esteja um
+             * pouco indisposto a ser pai (tiredness = 0b01), porém possui um RSSI muito
+             * melhor do que outros, pode ainda ser selecionado.
+             */
+            uint32_t s = static_cast<uint32_t>(rank.tiredness ^ 0b11) << 15;
+            
+            // Score do RSSI (-127dBm -> 0; 0dBm -> 255)
+            int32_t rssiScore = 255 + static_cast<int32_t>(last_rssi * 2);
+            if (rssiScore < 0) rssiScore = 0;
+
+            // Score do SNR (linear)
+            int32_t snrScore = static_cast<int32_t>(last_snr * 4);
+            if (snrScore < 0) snrScore = 0;
+
+            return s + static_cast<uint32_t>((rssiScore << 8) + snrScore);
+        }
+    };
+
+    struct CandidateParents {
+        /**
+         * @brief Um vetor com informações de nós vizinhos candidatos a serem pais do nó atual.
+         */
+        port::static_vector<ParentInfo, 8> candidate_parents;
+
+        /**
+         * @brief Limpa o vetor de pais candidatos.
+         */
+        void clear();
+
+        /**
+         * @brief Atualiza o vetor de pais candidatos para incluir as informações do pai dado.
+         */
+        void add_or_update(ParentInfo &&info);
+
+        /**
+         * @brief Ordena a lista de pais candidatos usando a função de objetivo.
+         * @returns O ID do pai preferido, ou `nullopt` se `candidate_parents` estiver vazio.
+         */
+        port::optional<uint8_t> sort_by_objective();
     };
 
     struct ExperimentalState {
@@ -39,6 +98,11 @@ namespace lora {
          * @brief Os parâmetros LoRa atuais.
          */
         lora::Parameters params;
+
+        /**
+         * @brief Usado para sincronizar o tempo entre os nós sensores.
+         */
+        NetworkTimer net_time;
 
         /**
          * @brief Um identificador único deste nó sensor.
@@ -57,9 +121,15 @@ namespace lora {
         uint8_t max_hops;
 
         /**
-         * @brief Usado para sincronizar o tempo entre os nós sensores.
+         * @brief `true` caso qualquer nó com `rank.hops` maior tenha sido ouvido durante
+         * a inicialização.
          */
-        NetworkTimer net_time;
+        bool has_children;
+
+        /**
+         * @brief Mantém e gerencia uma lista de possíveis pais.
+         */
+        CandidateParents candidate_parents;
     };
 
     class ExperimentalProtocol : public Protocol, private port::Task {
@@ -99,9 +169,15 @@ namespace lora {
         void do_initialization_stage();
 
         /**
-         * @brief Avança o estado atual da FSM do protocolo de acordo com um evento externo.
+         * @brief Chamado ao receber `NOTIFICATION_IRQ` durante a inicialização.
          */
-        void handle_notification(uint32_t notification);
+        void handle_broadcast_irq_notification();
+
+        /**
+         * @brief Avança o estado atual da FSM do protocolo de acordo com um evento externo.
+         * @returns O próximo estado da FSM.
+         */
+        ExperimentalFSM handle_notification(uint32_t &notification);
 
         /**
          * @brief Função principal da task do protocolo experimental.
@@ -119,9 +195,9 @@ namespace lora {
         void open_rx_continuous(uint32_t window_ms);
 
         /**
-         * @brief Espera até poder transmitir novamente.
+         * @brief Espera até inicializar os slots de transmissão deste nó.
          */
-        void wait_until_tx();
+        void wait_for_slot();
 
         /**
          * @brief Aguarda por uma notificação e lida com notificações simples.

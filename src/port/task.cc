@@ -1,9 +1,16 @@
 #include "port/task.hh"
 #include <assert.h>
+#include <unistd.h>
 
 namespace port {
     uint32_t await_notification() {
         uint32_t notification;
+
+#if !defined(NDEBUG) && defined(ESP32) && ESP32
+        // Sincronizar logs caso seja uma build de debug
+        fflush(stdout);
+        fsync(fileno(stdout));
+#endif
         
         // Interromper execução até receber uma notificação.
         xTaskNotifyWait(

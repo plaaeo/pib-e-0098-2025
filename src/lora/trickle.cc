@@ -5,8 +5,9 @@ namespace lora {
     constexpr static auto TAG = "trickle";
 
     TrickleTimer::TrickleTimer(port::Task *task, TrickleTimerState &state)
-        : m_Timer(task, NOTIFICATION_TRICKLE)
-        , m_State(&state)
+        : m_State(&state)
+        , m_Timer(task, NOTIFICATION_TRICKLE)
+        , m_Running(false)
     { };
 
     void TrickleTimer::try_begin(
@@ -18,7 +19,7 @@ namespace lora {
         if (m_State == nullptr) return;
 
         // Garantir que o timer não está rodando
-        if (m_Timer.is_running()) return;
+        if (m_Running) return;
         
         *m_State = {
             .counter = 0,
@@ -36,22 +37,25 @@ namespace lora {
 
         m_State->interval_start_time_us = port::get_rtc_time();
 
-        PORT_LOGI(TAG, "initialized timer (k = %u, I = %lluus, t = %lluus)",
+        PORT_LOGD(TAG, "initialized timer (k = %u, I = %lluus, t = %lluus)",
                   redundancy_constant, min_interval, m_State->transmit_delay);
+        
+        m_Running = true;
     };
 
     void TrickleTimer::stop() {
         m_Timer.stop();
+        m_Running = false;
     };
 
     bool TrickleTimer::timed_out() {
-        if (m_State == nullptr) return false;
+        if (m_State == nullptr || !m_Running) return false;
     
         // Verificar se o timeout ocorreu no tempo `t`
         auto timeNow = port::get_rtc_time();
         auto endTime = m_State->calculate_interval_end_time();
         
-        PORT_LOGI(TAG, "timed out (count = %u, start = %lluus, now = %lluus, end = %lluus)",
+        PORT_LOGD(TAG, "timed out (count = %u, start = %lluus, now = %lluus, end = %lluus)",
                   m_State->counter, m_State->interval_start_time_us, timeNow, endTime);
 
         if (timeNow < endTime) {
@@ -72,8 +76,8 @@ namespace lora {
 
         m_State->interval_start_time_us = port::get_rtc_time();
 
-        PORT_LOGI(TAG, "extended timer (I = %lluus, t = %lluus)",
-                  m_State->calculate_interval_duration(), m_State->transmit_delay);
+        PORT_LOGD(TAG, "extended timer (I(%hhu) = %lluus, t = %lluus)",
+                  m_State->max_interval_doublings, m_State->calculate_interval_duration(), m_State->transmit_delay);
 
         return false;
     };

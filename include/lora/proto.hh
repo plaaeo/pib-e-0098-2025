@@ -24,8 +24,8 @@ namespace lora {
          */
         inline static Rank from(uint8_t value) {
             return {
-                .hops       = value & 0b11111100,
-                .tiredness  = value & 0b00000011,
+                .hops       = static_cast<uint8_t>(value >> 2U),
+                .tiredness  = static_cast<uint8_t>(value & 0b11),
             };
         }
 
@@ -33,9 +33,10 @@ namespace lora {
          * @brief Converte o rank para um valor numérico.
          */
         explicit inline operator uint8_t() const {
-            uint8_t x;
-            memcpy(&x, this, sizeof(uint8_t));
-            return x;
+            return (
+                (static_cast<uint8_t>(hops) << 2)
+                | static_cast<uint8_t>(tiredness)
+            );
         }
 
         inline bool operator>(const Rank &other) const {

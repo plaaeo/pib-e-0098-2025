@@ -83,5 +83,6 @@ namespace lora {
     private:
         TrickleTimerState  *m_State;
         port::NotifyTimer   m_Timer;
+        bool                m_Running;
     };
 }
