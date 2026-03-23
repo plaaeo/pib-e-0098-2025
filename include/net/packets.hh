@@ -4,7 +4,7 @@
 
 namespace net {
     struct Broadcast {
-        constexpr static size_t BROADCAST_MAX_SIZE = 7;
+        constexpr static size_t BROADCAST_MAX_SIZE = 11;
         
         /**
          * @brief O tempo, em microsegundos, passado desde o fim da transmissão do 
@@ -21,6 +21,11 @@ namespace net {
          * @brief O rank do nó transmissor da mensagem.
          */
         Rank rank;
+        
+        /**
+         * @brief Mantém parâmetros de timing de slots entre nós.
+         */
+        net::SlotTimingInfo slot_info;
 
         /**
          * @brief Denota o número de hops até chegar no nó folha mais distante, caso

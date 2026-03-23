@@ -77,7 +77,7 @@ namespace net {
         m_State->interval_start_time_us = port::get_rtc_time();
 
         PORT_LOGD(TAG, "extended timer (I(%hhu) = %lluus, t = %lluus)",
-                  m_State->max_interval_doublings, m_State->calculate_interval_duration(), m_State->transmit_delay);
+                  m_State->interval_duration_doublings, m_State->calculate_interval_duration(), m_State->transmit_delay);
 
         return false;
     };

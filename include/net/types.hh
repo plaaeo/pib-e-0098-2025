@@ -59,7 +59,7 @@ namespace net {
         constexpr bool operator<=(const Rank &other) const { return operator<(other) || operator==(other); }
     };
 
-    constexpr size_t    MAX_CANDIDATE_PARENTS = 8;
+    constexpr size_t    MAX_CANDIDATE_PARENTS = 16;
     constexpr node_id   GATEWAY_ID = 0;
     constexpr uint8_t   UNKNOWN_MAX_HOPS = 0;
     constexpr Rank      INFINITE_RANK = Rank::from(0xFF);
@@ -125,9 +125,9 @@ namespace net {
         uint8_t tdm_slot_count;
     };
 
-    template<typename FSM>
+    template<typename RtState>
     struct State {
-        FSM state;
+        RtState rt_state;
 
         /**
          * @brief O estado do último trickle timer executado.
@@ -142,7 +142,7 @@ namespace net {
         /**
          * @brief Mantém parâmetros de timing de slots entre nós.
          */
-        net::SlotTimingInfo slots;
+        net::SlotTimingInfo slot_info;
 
         /**
          * @brief Um identificador único deste nó sensor.

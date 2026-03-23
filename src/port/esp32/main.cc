@@ -85,10 +85,13 @@ sensor::ADS1X15Interface g_ADC;
 lora::Protocol *g_Proto = nullptr;
 
 RTC_DATA_ATTR lora::State g_State = {
-    .state = lora::ExperimentalFSM::INITIALIZED,
+    .rt_state = {
+        //< Aproximadamente o tempo de inicialização do ESP32-S3 durante deep sleep, descoberto experimentalmente.
+        .slot_timer_calibration = -1000000,
+    },
     .trickle = { },
     .net_time = { },
-    .slots = { },
+    .slot_info = { },
     .id = UINT8_MAX,
     .rank = net::INFINITE_RANK,
     .max_hops = net::UNKNOWN_MAX_HOPS,

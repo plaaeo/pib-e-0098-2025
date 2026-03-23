@@ -18,11 +18,6 @@ constexpr static auto TRICKLE_MIN_INTERVAL_PACKETS  = 2;
 //< Número máximo de vezes que um intervalo pode dobrar no Trickle.
 constexpr static auto TRICKLE_MAX_DOUBLINGS         = 4;
 
-constexpr static auto TDM_SUBSLOT_GUARD_SYMBOLS     = 2;
-constexpr static auto TDM_SUBSLOT_MTU_BYTES         = 64;
-constexpr static auto TDM_SUBSLOT_COUNT             = 1;
-constexpr static auto TDM_SLOT_COUNT                = 4;
-
 namespace lora {
     constexpr static uint32_t NOTIFICATION_IRQ = 1 << 0;
     constexpr static uint32_t NOTIFICATION_KILL = 1 << 1;
@@ -73,8 +68,10 @@ namespace lora {
     bool ExperimentalProtocol::process_broadcast(const net::Broadcast &packet) {
         bool reportInconsistency = false;
 
-        // Atualizar fonte de referência do tempo ao receber o primeiro broadcast.
+        // Atualizar fonte de referência do tempo e informações de slot apenas ao receber o primeiro broadcast.
         if (m_State.rank == net::INFINITE_RANK) {
+            m_State.slot_info = packet.slot_info;
+
             /**
              * Ao receber um pacote, um dos delays que contribuem à dessincronização do tempo entre os nós é
              * um pequeno delay de (o que assumo que seja) processamento do sinal por parte do radio. Como esse
@@ -100,7 +97,7 @@ namespace lora {
 
         // Caso nosso rank tenha mudado, há uma inconsistência.
         if (m_State.rank == net::INFINITE_RANK || m_State.rank.hops > (packet.rank.hops + 1)) {
-            auto old = m_State.rank;
+            auto old = m_State.rank.hops;
 
             // Todos os pais serão invalidados, pois nosso rank agora é igual ou menor que o rank deles,
             // logo nos tornamos apenas nós vizinhos.
@@ -109,7 +106,7 @@ namespace lora {
             m_State.rank.hops = packet.rank.hops + 1;
             reportInconsistency = true;
 
-            PORT_LOGI(TAG, "rank was updated from %hhu -> %hhu", static_cast<uint8_t>(old), static_cast<uint8_t>(m_State.rank));
+            PORT_LOGI(TAG, "rank.hops was updated from %hhu -> %hhu", old, m_State.rank.hops);
         }
         // Salvar caso tenhamos escutado um nó filho
         else if (packet.rank.hops > m_State.rank.hops) {
@@ -130,23 +127,30 @@ namespace lora {
         return reportInconsistency;
     };
 
-    void ExperimentalProtocol::wait_for_slot() {
+    void ExperimentalProtocol::sleep_until_next_slot() {
+        auto &si = m_State.slot_info;
+
+        assert(m_Phys->sleep() == RADIOLIB_ERR_NONE);
+
         // A duração de um slot completo
-        port::time_us slotDuration = m_Phys->getTimeOnAir(TDM_SUBSLOT_MTU_BYTES);
-        slotDuration += TDM_SUBSLOT_COUNT * TDM_SUBSLOT_GUARD_SYMBOLS * m_Params.calculate_symbol_time();
+        port::time_us slotDuration = m_Phys->getTimeOnAir(si.tdm_subslot_mtu_bytes);
+        slotDuration += si.tdm_subslot_count * si.tdm_subslot_guard_symbols * m_Params.calculate_symbol_time();
         
         // A duração de uma contagem monotônica de slots até a contagem reiniciar
-        port::time_us frameDuration = slotDuration * TDM_SLOT_COUNT;
+        port::time_us frameDuration = slotDuration * si.tdm_slot_count;
         
         // Calcular o índice do nosso slot
         uint8_t mySlot = m_State.max_hops - m_State.rank.hops;
         
         // Calcular o tempo até o próximo slot nosso
-        port::time_us timeUntilNextSlot = m_State.net_time.get_time_us();
-        timeUntilNextSlot -= mySlot * slotDuration;
+        port::time_us timeUntilNextSlot = -static_cast<port::time_us>(mySlot * slotDuration);
+        port::time_us now = m_State.net_time.get_time_us();
+        timeUntilNextSlot += now;
         timeUntilNextSlot %= frameDuration;
         timeUntilNextSlot = frameDuration - timeUntilNextSlot;
-        m_TimeoutTimer.start_once(timeUntilNextSlot);
+        
+        m_State.rt_state.expected_slot_wakeup_time = now + timeUntilNextSlot;
+        esp_deep_sleep(timeUntilNextSlot + m_State.rt_state.slot_timer_calibration);
     }
 
     void ExperimentalProtocol::handle_broadcast_irq_notification() {
@@ -186,8 +190,8 @@ namespace lora {
             return;
         }
 
-        PORT_LOGI(TAG, "broadcast from ID %hhu, rank %hhu (rrsi=%f, snr=%f)",
-                    packet->id, static_cast<uint8_t>(packet->rank), rssi, snr);
+        PORT_LOGI(TAG, "broadcast from ID %hhu, rank %hhu.%hhu (rrsi=%f, snr=%f)",
+                    packet->id, packet->rank.hops, packet->rank.tiredness, rssi, snr);
 
         // Reportar inconsistência caso o estado mude
         if (process_broadcast(*packet)) m_Trickle.signal_inconsistency();
@@ -201,12 +205,12 @@ namespace lora {
         );
     }
 
-    ExperimentalFSM ExperimentalProtocol::handle_notification(uint32_t &notification) {
-        switch (m_State.state) {
+    void ExperimentalProtocol::handle_notification(uint32_t &notification) {
+        switch (m_State.rt_state.fsm) {
             case ExperimentalFSM::BROADCASTING:
                 // A mensagem deve ter terminado de transmitir.
                 if (notification & NOTIFICATION_IRQ) {
-                    notification ^= NOTIFICATION_IRQ;
+                    notification &= ~NOTIFICATION_IRQ;
                     auto flags = lora::get_irq_flags(m_Phys);
                     /** @todo as vezes, tx_done = 0! investigar o porque */
                     assert(flags.tx_done);
@@ -214,7 +218,7 @@ namespace lora {
                     PORT_LOGI(TAG, "TRANSMITTED - rebroadcast done");
                 } else {
                     // A mensagem ainda não terminou de transmitir
-                    return ExperimentalFSM::BROADCASTING;
+                    return;
                 }
 
                 [[fallthrough]];
@@ -229,23 +233,25 @@ namespace lora {
                     .len = 0,
                 });
 
+                m_State.rt_state.fsm = ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS;
+                
                 // Finalizar apenas caso não haja notificação
                 if (notification == 0)
-                    return ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS;
+                    return;
                 
                 [[fallthrough]];
             case ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS: {
                 // Uma mensagem pode ter sido recebida.
                 if (notification & NOTIFICATION_IRQ) {
-                    notification ^= NOTIFICATION_IRQ;
+                    notification &= ~NOTIFICATION_IRQ;
                     handle_broadcast_irq_notification();
                 }
 
                 // Caso o Trickle Timer tenha finalizado, talvez seja possível transmitir nosso broadcast.
                 if (notification & NOTIFICATION_TRICKLE) {
-                    notification ^= NOTIFICATION_TRICKLE;
+                    notification &= ~NOTIFICATION_TRICKLE;
                     if (!m_Trickle.update_and_check())
-                        return ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS;
+                        return;
 
                     /**
                      * Não há necessidade de cancelar uma recepção para iniciar uma transmissão, pois
@@ -254,7 +260,7 @@ namespace lora {
                      */
                     if (lora::is_receiving(m_Phys)) {
                         PORT_LOGI(TAG, "suppressed broadcast due to channel occupation");
-                        return ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS;
+                        return;
                     }
 
                     /**
@@ -275,6 +281,7 @@ namespace lora {
                         .reference_time_us = static_cast<int32_t>(m_State.net_time.get_time_us()),
                         .id = m_State.id,
                         .rank = m_State.rank,
+                        .slot_info = m_State.slot_info,
                         .max_hops = m_State.max_hops,
                     };
 
@@ -311,19 +318,30 @@ namespace lora {
                         assert(m_Phys->finishReceive() == RADIOLIB_ERR_NONE);
                         m_Trickle.stop();
 
-                        wait_for_slot();
-                        return ExperimentalFSM::EXECUTING;
+                        
+                        m_State.rt_state.fsm = ExperimentalFSM::EXECUTING;
+                        return sleep_until_next_slot();
                     }
 
-                    return ExperimentalFSM::BROADCASTING;
+                    m_State.rt_state.fsm = ExperimentalFSM::BROADCASTING;
+                    return;
                 }
 
-                return ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS;
+                return;
             }; break;
 
             case ExperimentalFSM::EXECUTING: {
-                if (notification & NOTIFICATION_TIMER) {
-                    notification ^= NOTIFICATION_TIMER;
+                port::time_us now = m_State.net_time.get_time_us();
+
+                if (notification == 0 || notification & NOTIFICATION_TIMER) {
+                    notification &= ~NOTIFICATION_TIMER;
+                    
+                    // Calibrar o tempo de início do slot com o RTC
+                    auto calibDiff = m_State.rt_state.expected_slot_wakeup_time - now;
+                    m_State.rt_state.slot_timer_calibration += calibDiff;
+
+                    PORT_LOGI(TAG, "wakeup time difference: %lli", calibDiff);
+
                     gpio_set_level(STATUS_LED, HIGH);
                     gpio_hold_en(STATUS_LED);
 
@@ -331,10 +349,10 @@ namespace lora {
                     
                     gpio_hold_dis(STATUS_LED);
                     gpio_set_level(STATUS_LED, LOW);
-                    wait_for_slot();
+                    sleep_until_next_slot();
                 }
                 
-                return ExperimentalFSM::EXECUTING;
+                return;
             }; break;
             
             default: {
@@ -358,18 +376,20 @@ namespace lora {
         lora::set_phy_parameters(m_Phys, m_Params);
 
         // Transmitir mensagem falsa de início de broadcast
-        lora::send_nonblocking(m_Phys, {
-            .data = (const uint8_t *) "\x00\x00\x00\x00\x00\x00",
-            .len = 6,
-            .addr = 0,
-        });
+        if (m_State.rt_state.fsm == ExperimentalFSM::INITIALIZED) {
+            lora::send_nonblocking(m_Phys, {
+                .data = (const uint8_t *) "\x00\x00\x00\x00\x00\x00\x02\x40\x01\x04",
+                .len = 10,
+                .addr = 0,
+            });
 
-        port::await_notification();
+            port::await_notification();
+        }
 
         uint32_t notification = 0;
 
         for ( ;; ) {
-            m_State.state = handle_notification(notification);            
+            handle_notification(notification);            
             notification |= port::await_notification();
         }
     }

@@ -18,7 +18,7 @@ namespace lora {
         /**
          * @brief Valor padrão após a construção inicial da máquina.
          */
-        INITIALIZED,
+        INITIALIZED = 0,
 
         /**
          * @brief O nó está aguardando por broadcasts de vizinhos.
@@ -36,7 +36,21 @@ namespace lora {
         EXECUTING,
     };
 
-    using State = net::State<ExperimentalFSM>;
+    struct RuntimeState {
+        ExperimentalFSM fsm;
+
+        /**
+         * @brief O tempo esperado da função `net::Clock::get_time_us()` ao acordar do slot timer.
+         */
+        int64_t expected_slot_wakeup_time;
+
+        /**
+         * @brief Valor adicionado ao tempo de delay do slot timer para calibração.
+         */
+        int64_t slot_timer_calibration;
+    };
+
+    using State = net::State<RuntimeState>;
 
     class ExperimentalProtocol : public Protocol, private port::Task {
     protected:
@@ -76,9 +90,8 @@ namespace lora {
 
         /**
          * @brief Avança o estado atual da FSM do protocolo de acordo com um evento externo.
-         * @returns O próximo estado da FSM.
          */
-        ExperimentalFSM handle_notification(uint32_t &notification);
+        void handle_notification(uint32_t &notification);
 
         /**
          * @brief Função principal da task do protocolo experimental.
@@ -86,9 +99,9 @@ namespace lora {
         void main() override;
 
         /**
-         * @brief Espera até inicializar os slots de transmissão deste nó.
+         * @brief Dorme até inicializar os slots de recepção deste nó.
          */
-        void wait_for_slot();
+        void sleep_until_next_slot();
 
         /**
          * @brief ISR que notifica a task do protocolo experimental.
