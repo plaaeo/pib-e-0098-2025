@@ -1,5 +1,7 @@
 #pragma once
 
+#include <math.h>
+
 namespace sensor {
     /**
      * @brief Armazena valores de calibração de um sensor de temperatura NTC 10k.
@@ -16,6 +18,15 @@ namespace sensor {
          * @brief Coleta a temperatura de um NTC 10K e converte-a para celsius
          * usando a fórmula de Steinhart-Hart.
          */
-        float convert(float volts) const noexcept;
+        float convert(float volts) const noexcept {
+            // Calcular resistência do thermistor
+            float R = 10000.0f * ((vref / volts) - 1);
+
+            // Calcular 1/T usando Steinhart-Hart
+            float logR = log(R);
+            float invT = a + (b * logR) + (c * logR * logR * logR);
+
+            return (1.0f / invT) - 273.15f + offset;
+        }
     };
 }

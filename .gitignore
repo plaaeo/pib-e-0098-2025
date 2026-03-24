@@ -1,5 +1,5 @@
 .pio/
 .vscode/
-include/secret.hh
+*/secret.hh
 sdkconfig.*
 !sdkconfig.defaults

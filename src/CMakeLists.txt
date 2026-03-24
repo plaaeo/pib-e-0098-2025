@@ -14,7 +14,4 @@ idf_component_register(
     ${CMAKE_SOURCE_DIR}/src/port/esp32/time.cc
     ${CMAKE_SOURCE_DIR}/src/port/task.cc
     ${CMAKE_SOURCE_DIR}/src/sensor/interface.cc
-    ${CMAKE_SOURCE_DIR}/src/sensor/ph.cc
-    ${CMAKE_SOURCE_DIR}/src/sensor/tds.cc
-    ${CMAKE_SOURCE_DIR}/src/sensor/temperature.cc
 )

@@ -15,6 +15,8 @@ namespace sensor {
          * @brief Converte a tensão da saída `Pout` do leitor para um valor de pH.
          * @warning A conversão assume que o módulo está conectado a 5 volts.
          */
-        float convert(float volts) const noexcept;
+        float convert(float volts) const noexcept  {
+            return (a * volts) + b;
+        };
     };
 }
