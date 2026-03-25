@@ -11,7 +11,10 @@ uint32_t AnalogInterface::channel_count() const
 };
 
 #ifdef ESP32
-ADS1X15Interface::ADS1X15Interface() : AnalogInterface(4) {}
+ADS1X15Interface::ADS1X15Interface()
+    : AnalogInterface(4)
+{
+}
 
 bool ADS1X15Interface::begin(TwoWire &wire)
 {
@@ -33,9 +36,9 @@ float ADS1X15Interface::measure_volts(uint32_t channel)
 #endif
 
 ArduinoInterface::ArduinoInterface(uint8_t resolution_bits, float vref)
-    : AnalogInterface(NUM_ANALOG_INPUTS),
-      m_Resolution(resolution_bits),
-      m_Vref(vref)
+    : AnalogInterface(NUM_ANALOG_INPUTS)
+    , m_Resolution(resolution_bits)
+    , m_Vref(vref)
 {
 }
 

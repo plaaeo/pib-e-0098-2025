@@ -92,7 +92,7 @@ RTC_DATA_ATTR lora::State g_State = {
     .net_time = { },
     .slot_info = { },
     .id = UINT8_MAX,
-    .rank = net::INFINITE_RANK,
+    .rank = net::infinite_rank,
     .max_hops = net::UNKNOWN_MAX_HOPS,
     .has_children = false,
     .candidate_parents = { },
@@ -133,7 +133,7 @@ extern "C" void app_main(void)
 {
     initArduino();
 
-    if constexpr (STATUS_LED != GPIO_NUM_NC) {
+    if (STATUS_LED != GPIO_NUM_NC) {
         pinMode(STATUS_LED, OUTPUT);
     }
 

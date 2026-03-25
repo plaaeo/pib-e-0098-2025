@@ -1,4 +1,6 @@
 #pragma once
+#include <etl/optional.h>
+#include <etl/vector.h>
 #include <stdint.h>
 
 #include "net/clock.hh"
@@ -75,7 +77,7 @@ struct Rank
 constexpr size_t  MAX_CANDIDATE_PARENTS = 16;
 constexpr node_id GATEWAY_ID = 0;
 constexpr uint8_t UNKNOWN_MAX_HOPS = 0;
-constexpr Rank    INFINITE_RANK = Rank::from(0xFF);
+constexpr Rank    infinite_rank = Rank::from(0xFF);
 
 /**
  * @brief Representa as informações de um vizinho potencialmente pai
@@ -118,8 +120,7 @@ struct CandidateParents
      * @brief Um vetor com informações de nós vizinhos candidatos a serem pais
      * do nó atual.
      */
-    port::static_vector<ParentInfo, net::MAX_CANDIDATE_PARENTS>
-        candidate_parents;
+    etl::vector<ParentInfo, net::MAX_CANDIDATE_PARENTS> candidate_parents;
 
     /**
      * @brief Limpa o vetor de pais candidatos.
@@ -137,7 +138,7 @@ struct CandidateParents
      * @returns O ID do pai preferido, ou `nullopt` se `candidate_parents`
      * estiver vazio.
      */
-    port::optional<uint8_t> sort_by_objective();
+    etl::optional<uint8_t> sort_by_objective();
 };
 
 struct SlotTimingInfo

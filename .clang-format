@@ -4,7 +4,10 @@ BreakBeforeBraces: Mozilla
 Cpp11BracedListStyle: false
 IndentPPDirectives: AfterHash
 IndentWidth: 4
+AccessModifierOffset: -4
 PointerAlignment: Right
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: Never
 AttributeMacros: [ ISR_SAFE_ATTR RTC_DATA_ATTR ]
 AlignConsecutiveDeclarations:
     Enabled: true

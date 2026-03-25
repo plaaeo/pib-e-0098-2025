@@ -7,7 +7,9 @@ constexpr static auto TAG = "trickle";
 TrickleTimer::TrickleTimer(port::Task        *task,
                            uint32_t           notification,
                            TrickleTimerState &state)
-    : m_State(&state), m_Timer(task, notification), m_Running(false) {};
+    : m_State(&state)
+    , m_Timer(task, notification)
+    , m_Running(false) {};
 
 void TrickleTimer::try_begin(uint32_t      redundancy_constant,
                              port::time_us min_interval,

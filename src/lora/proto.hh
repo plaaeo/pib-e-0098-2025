@@ -7,12 +7,13 @@
 namespace lora {
 class Protocol
 {
-   protected:
+protected:
     PhysicalLayer *m_Phys;
 
-    Protocol(PhysicalLayer *phys) : m_Phys(phys) {};
+    Protocol(PhysicalLayer *phys)
+        : m_Phys(phys) {};
 
-   public:
+public:
     virtual ~Protocol() = default;
 
     /**

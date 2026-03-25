@@ -45,22 +45,22 @@ struct RuntimeState
      * @brief O tempo esperado da função `net::Clock::get_time_us()` ao acordar
      * do slot timer.
      */
-    int64_t expected_slot_wakeup_time;
+    port::time_us expected_slot_wakeup_time;
 
     /**
      * @brief Valor adicionado ao tempo de delay do slot timer para calibração.
      */
-    int64_t slot_timer_calibration;
+    port::time_us slot_timer_calibration;
 };
 
 using State = net::State<RuntimeState>;
 
 class ExperimentalProtocol : public Protocol, private port::Task
 {
-   protected:
+protected:
     ExperimentalProtocol(PhysicalLayer *phys, State &state);
 
-   public:
+public:
     /**
      * @brief Cria uma instância do protocolo experimental.
      * @param phys O radiotransmissor a ser utilizado.
@@ -77,7 +77,7 @@ class ExperimentalProtocol : public Protocol, private port::Task
      */
     bool schedule(const sensor::Reading &reading) override;
 
-   private:
+private:
     /**
      * @brief Atualizando o estado atual do protocolo de acordo com um broadcast
      * recebido.
@@ -113,7 +113,7 @@ class ExperimentalProtocol : public Protocol, private port::Task
      */
     static void ISR_SAFE_ATTR isr_notify_task();
 
-   private:
+private:
     State &m_State;
 
     lora::Parameters m_Params;

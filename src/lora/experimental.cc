@@ -70,7 +70,7 @@ bool ExperimentalProtocol::process_broadcast(const net::Broadcast &packet)
 
     // Atualizar fonte de referência do tempo e informações de slot apenas
     // ao receber o primeiro broadcast.
-    if (m_State.rank == net::INFINITE_RANK) {
+    if (m_State.rank == net::infinite_rank) {
         m_State.slot_info = packet.slot_info;
 
         /**
@@ -107,7 +107,7 @@ bool ExperimentalProtocol::process_broadcast(const net::Broadcast &packet)
     }
 
     // Caso nosso rank tenha mudado, há uma inconsistência.
-    if (m_State.rank == net::INFINITE_RANK ||
+    if (m_State.rank == net::infinite_rank ||
         m_State.rank.hops > (packet.rank.hops + 1)) {
         auto old = m_State.rank.hops;
 
@@ -147,9 +147,10 @@ void ExperimentalProtocol::sleep_until_next_slot()
     assert(m_Phys->sleep() == RADIOLIB_ERR_NONE);
 
     // A duração de um slot completo
-    port::time_us slotDuration = m_Phys->getTimeOnAir(si.tdm_subslot_mtu_bytes);
-    slotDuration += si.tdm_subslot_count * si.tdm_subslot_guard_symbols *
-                    m_Params.calculate_symbol_time();
+    port::time_us slotDuration =
+        m_Phys->getTimeOnAir(si.tdm_subslot_mtu_bytes) +
+        si.tdm_subslot_count * si.tdm_subslot_guard_symbols *
+            m_Params.calculate_symbol_time();
 
     // A duração de uma contagem monotônica de slots até a contagem
     // reiniciar
@@ -159,11 +160,9 @@ void ExperimentalProtocol::sleep_until_next_slot()
     uint8_t mySlot = m_State.max_hops - m_State.rank.hops;
 
     // Calcular o tempo até o próximo slot nosso
-    port::time_us timeUntilNextSlot =
-        -static_cast<port::time_us>(mySlot * slotDuration);
+    port::time_us timeUntilNextSlot = mySlot * slotDuration;
     port::time_us now = m_State.net_time.get_time_us();
-    timeUntilNextSlot += now;
-    timeUntilNextSlot %= frameDuration;
+    timeUntilNextSlot = (timeUntilNextSlot - now) % frameDuration;
     timeUntilNextSlot = frameDuration - timeUntilNextSlot;
 
     m_State.rt_state.expected_slot_wakeup_time = now + timeUntilNextSlot;

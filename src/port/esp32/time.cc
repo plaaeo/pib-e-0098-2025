@@ -16,7 +16,9 @@ port::time_us get_rtc_time()
 }
 
 NotifyTimer::NotifyTimer(port::Task *task, uint32_t notification)
-    : m_Inner(nullptr), m_Task(task), m_Notification(notification)
+    : m_Inner(nullptr)
+    , m_Task(task)
+    , m_Notification(notification)
 {
     esp_timer_create_args_t timer_cfg{
         .callback =
