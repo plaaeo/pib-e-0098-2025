@@ -3,66 +3,68 @@
 #include "port/types.hh"
 
 #ifdef ESP32
-#   include <freertos/FreeRTOS.h>
-#   include <freertos/task.h>
+#    include <freertos/FreeRTOS.h>
+#    include <freertos/task.h>
 #else
-#   include <Arduino_FreeRTOS.h>
+#    include <Arduino_FreeRTOS.h>
 #endif
 
 namespace port {
-    constexpr auto STACK_SIZE = 4096;
+constexpr auto STACK_SIZE = 4096;
+
+/**
+ * @brief Interrompe a execução da task atual até receber uma notificação.
+ * @returns A notificação recebida.
+ */
+uint32_t await_notification();
+
+/**
+ * @brief Abstração simples para lidar com tasks do FreeRTOS.
+ */
+class Task
+{
+   protected:
+    /**
+     * @brief Cria uma task.
+     * @param name O nome da task. Usado apenas para debugging.
+     * @param priority A prioridade da task.
+     */
+    Task(const char *name, uint32_t priority);
 
     /**
-     * @brief Interrompe a execução da task atual até receber uma notificação.
-     * @returns A notificação recebida.
+     * @brief Função principal da task.
      */
-    uint32_t await_notification();
+    virtual void main() = 0;
+
+   public:
+    /**
+     * @brief Envia uma notificação para esta task.
+     * @param notification A notificação a ser enviada.
+     * @warning Esta função não deve ser executada por qualquer ISR.
+     */
+    void notify(uint32_t notification);
 
     /**
-     * @brief Abstração simples para lidar com tasks do FreeRTOS.
+     * @brief Envia uma notificação para esta task, de um ISR.
+     * @param notification A notificação a ser enviada.
+     * @returns `true` caso uma task de prioridade mais alta tiver sido
+     * acordada. Neste caso, é necessario executar `portYIELD_FROM_ISR` no fim
+     * da ISR.
      */
-    class Task {
-    protected:
-        /**
-         * @brief Cria uma task.
-         * @param name O nome da task. Usado apenas para debugging.
-         * @param priority A prioridade da task.
-         */
-        Task(const char *name, uint32_t priority);
+    bool ISR_SAFE_ATTR notify_from_isr(uint32_t notification);
 
-        /**
-         * @brief Função principal da task.
-         */
-        virtual void main() = 0;
+   protected:
+    TaskHandle_t m_Handle;
 
-    public:
-        /**
-         * @brief Envia uma notificação para esta task.
-         * @param notification A notificação a ser enviada.
-         * @warning Esta função não deve ser executada por qualquer ISR.
-         */
-        void notify(uint32_t notification);
-
-        /**
-         * @brief Envia uma notificação para esta task, de um ISR.
-         * @param notification A notificação a ser enviada.
-         * @returns `true` caso uma task de prioridade mais alta tiver sido acordada.
-         * Neste caso, é necessario executar `portYIELD_FROM_ISR` no fim da ISR.
-         */
-        bool ISR_SAFE_ATTR notify_from_isr(uint32_t notification);
-        
-    protected:
-        TaskHandle_t m_Handle;
-    private:
-
+   private:
 #if (configSUPPORT_STATIC_ALLOCATION == 1)
-        StaticTask_t m_Task;
-        StackType_t m_Stack[STACK_SIZE];
+    StaticTask_t m_Task;
+    StackType_t  m_Stack[STACK_SIZE];
 #endif
 
-        Task(Task&&) = delete;
-        Task(const Task&) = delete;
-        Task& operator=(Task&&) = delete;
-        Task& operator=(const Task&) = delete;
-    };
-}
+    Task(Task &&) = delete;
+    Task(const Task &) = delete;
+    Task &operator=(Task &&) = delete;
+    Task &operator=(const Task &) = delete;
+};
+}  // namespace port

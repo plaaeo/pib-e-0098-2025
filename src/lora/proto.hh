@@ -1,29 +1,30 @@
-#pragma once 
+#pragma once
 #include <RadioLib.h>
 
-#include "sensor/reading.hh"
 #include "port/types.hh"
+#include "sensor/reading.hh"
 
 namespace lora {
-    class Protocol {
-    protected:
-        PhysicalLayer* m_Phys;
-        
-        Protocol(PhysicalLayer *phys) : m_Phys(phys) { };
+class Protocol
+{
+   protected:
+    PhysicalLayer *m_Phys;
 
-    public:
-        virtual ~Protocol() = default;
-        
-        /**
-         * @brief Agenda a transmissão de uma leitura de sensor quando possível.
-         * @param reading A leitura realizada pelo nó sensor.
-         * @returns `true` se foi possível agendar a transmissão.
-         */
-        virtual bool schedule(const sensor::Reading& reading) = 0;
+    Protocol(PhysicalLayer *phys) : m_Phys(phys) {};
 
-        Protocol(Protocol&&) = delete;
-        Protocol(const Protocol&) = delete;
-        Protocol& operator=(Protocol&&) = delete;
-        Protocol& operator=(const Protocol&) = delete;
-    };
-}
+   public:
+    virtual ~Protocol() = default;
+
+    /**
+     * @brief Agenda a transmissão de uma leitura de sensor quando possível.
+     * @param reading A leitura realizada pelo nó sensor.
+     * @returns `true` se foi possível agendar a transmissão.
+     */
+    virtual bool schedule(const sensor::Reading &reading) = 0;
+
+    Protocol(Protocol &&) = delete;
+    Protocol(const Protocol &) = delete;
+    Protocol &operator=(Protocol &&) = delete;
+    Protocol &operator=(const Protocol &) = delete;
+};
+}  // namespace lora
