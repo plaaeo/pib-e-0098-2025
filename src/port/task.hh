@@ -23,7 +23,7 @@ uint32_t await_notification();
  */
 class Task
 {
-   protected:
+protected:
     /**
      * @brief Cria uma task.
      * @param name O nome da task. Usado apenas para debugging.
@@ -36,7 +36,7 @@ class Task
      */
     virtual void main() = 0;
 
-   public:
+public:
     /**
      * @brief Envia uma notificação para esta task.
      * @param notification A notificação a ser enviada.
@@ -53,10 +53,10 @@ class Task
      */
     bool ISR_SAFE_ATTR notify_from_isr(uint32_t notification);
 
-   protected:
+protected:
     TaskHandle_t m_Handle;
 
-   private:
+private:
 #if (configSUPPORT_STATIC_ALLOCATION == 1)
     StaticTask_t m_Task;
     StackType_t  m_Stack[STACK_SIZE];

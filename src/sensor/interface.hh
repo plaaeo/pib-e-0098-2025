@@ -18,12 +18,12 @@ namespace sensor {
  */
 class AnalogInterface
 {
-   protected:
+protected:
     uint32_t m_ChannelCount;
 
     AnalogInterface(uint32_t channels);
 
-   public:
+public:
     /**
      * @returns A quantidade de canais presente na interface.
      */
@@ -47,7 +47,7 @@ class AnalogInterface
  */
 class ADS1X15Interface : public AnalogInterface
 {
-   public:
+public:
     ADS1X15Interface();
 
     /**
@@ -61,7 +61,7 @@ class ADS1X15Interface : public AnalogInterface
      */
     virtual float measure_volts(uint32_t channel) override;
 
-   protected:
+protected:
     Adafruit_ADS1X15 m_ADC;
 };
 #endif
@@ -77,7 +77,7 @@ class ADS1X15Interface : public AnalogInterface
  */
 class ArduinoInterface : public AnalogInterface
 {
-   public:
+public:
     ArduinoInterface(uint8_t resolution_bits, float vref);
 
     /**
@@ -106,7 +106,7 @@ class ArduinoInterface : public AnalogInterface
      */
     virtual float measure_volts(uint32_t channel) override;
 
-   protected:
+protected:
     uint8_t m_Resolution;
     float   m_Vref;
 };

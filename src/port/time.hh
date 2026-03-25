@@ -47,7 +47,7 @@ struct NotifyTimer
      */
     bool is_running();
 
-   private:
+private:
     void       *m_Inner;
     port::Task *m_Task;
     uint32_t    m_Notification;

@@ -46,10 +46,13 @@ struct TrickleTimerState
  */
 class TrickleTimer
 {
-   public:
+public:
     TrickleTimer(port::Task        *task,
                  uint32_t           notification,
-                 TrickleTimerState &state);
+                 TrickleTimerState &state)
+        : m_State(&state)
+        , m_Timer(task, notification)
+        , m_Running(false) {};
 
     /**
      * @brief Tenta inicializar o trickle timer. Não faz nada caso ele já esteja
@@ -90,7 +93,7 @@ class TrickleTimer
      */
     void signal_inconsistency();
 
-   private:
+private:
     TrickleTimerState *m_State;
     port::NotifyTimer  m_Timer;
     bool               m_Running;
