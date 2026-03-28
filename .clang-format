@@ -8,7 +8,7 @@ AccessModifierOffset: -4
 PointerAlignment: Right
 BreakConstructorInitializers: BeforeComma
 PackConstructorInitializers: Never
-AttributeMacros: [ ISR_SAFE_ATTR RTC_DATA_ATTR ]
+AttributeMacros: [ PORT_ISR_SAFE PORT_PERSIST_SLEEP ]
 AlignConsecutiveDeclarations:
     Enabled: true
 AlignConsecutiveMacros:
