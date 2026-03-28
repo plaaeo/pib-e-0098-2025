@@ -65,7 +65,7 @@ using event_bits = uint32_t;
  * @returns `true` se foi possível adicionar a task, `false` caso contrário.
  *
  * @note Definido pela plataforma.
- * @note Em caso de sucesso, o método `on_enter()` da task deve ser
+ * @note Em caso de sucesso, o método `on_start()` da task deve ser
  * executado uma vez pela plataforma. A qualquer momento após a execução da
  * função `mark_for_execution(x)`, `run_once(x)` deve ser executado.
  * @note O campo `m_Impl` pode ser usado para armazenar dados de
@@ -111,7 +111,7 @@ protected:
     /**
      * @brief Executado ao criar a task.
      */
-    virtual void on_enter() {};
+    virtual void on_start() {};
 
     /**
      * @brief Executado sempre que o campo de eventos for modificado

@@ -1,5 +1,4 @@
 #include "net/trickle.hh"
-#include "lora/util.hh"
 
 namespace net {
 constexpr static auto TAG = "trickle";

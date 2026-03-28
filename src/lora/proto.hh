@@ -1,20 +1,20 @@
 #pragma once
 #include <RadioLib.h>
 
-#include "port/types.hh"
+#include "lora/radio.hh"
 #include "sensor/reading.hh"
 
 namespace lora {
-class Protocol
+class IProtocol
 {
 protected:
-    PhysicalLayer *m_Phys;
+    lora::IAsyncRadio &m_Phys;
 
-    Protocol(PhysicalLayer *phys)
+    IProtocol(lora::IAsyncRadio &phys)
         : m_Phys(phys) {};
 
 public:
-    virtual ~Protocol() = default;
+    virtual ~IProtocol() = default;
 
     /**
      * @brief Agenda a transmissão de uma leitura de sensor quando possível.
@@ -23,9 +23,9 @@ public:
      */
     virtual bool schedule(const sensor::Reading &reading) = 0;
 
-    Protocol(Protocol &&) = delete;
-    Protocol(const Protocol &) = delete;
-    Protocol &operator=(Protocol &&) = delete;
-    Protocol &operator=(const Protocol &) = delete;
+    IProtocol(IProtocol &&) = delete;
+    IProtocol(const IProtocol &) = delete;
+    IProtocol &operator=(IProtocol &&) = delete;
+    IProtocol &operator=(const IProtocol &) = delete;
 };
 }  // namespace lora

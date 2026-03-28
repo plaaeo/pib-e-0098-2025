@@ -1,6 +1,7 @@
-#include "port/types.hh"
 #include <etl/algorithm.h>
+
 #include "net/types.hh"
+#include "port/port.hh"
 
 namespace net {
 constexpr auto TAG = "net";

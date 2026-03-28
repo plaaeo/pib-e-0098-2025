@@ -4,6 +4,17 @@
 
 #include "port/port.hh"
 
+#define LORA_ASSERT(expr)                                                      \
+    do {                                                                       \
+        ::lora::StatusCode ___LORA_ASSERT_EXPR = (expr);                       \
+        if (unlikely(___LORA_ASSERT_EXPR != ::lora::StatusCode::ok)) {         \
+            PORT_LOGE("lora",                                                  \
+                      __FILE__ " at line %u: assertion failed with status %u", \
+                      __LINE__, static_cast<::uint32_t>(___LORA_ASSERT_EXPR)); \
+            ::abort();                                                         \
+        }                                                                      \
+    } while (0);
+
 namespace lora {
 
 using packet_length = uint8_t;
@@ -12,7 +23,7 @@ using packet_length = uint8_t;
  * @brief Define bitflags utilizadas para interpretar flags de interrupção
  * genericamente nos módulos LoRa.
  */
-enum IrqFlags
+enum IrqFlags : uint32_t
 {
     /* clang-format off */
     IRQ_TX_DONE             = 1U << 0,
@@ -27,6 +38,45 @@ enum IrqFlags
     IRQ_TIMEOUT             = 1U << 9,
     /* clang-format on */
 };
+
+constexpr IrqFlags operator~(IrqFlags r)
+{
+    return static_cast<IrqFlags>(~static_cast<uint32_t>(r));
+}
+
+constexpr IrqFlags operator|(IrqFlags l, IrqFlags r)
+{
+    return static_cast<IrqFlags>(static_cast<uint32_t>(l) |
+                                 static_cast<uint32_t>(r));
+}
+
+constexpr IrqFlags operator&(IrqFlags l, IrqFlags r)
+{
+    return static_cast<IrqFlags>(static_cast<uint32_t>(l) &
+                                 static_cast<uint32_t>(r));
+}
+
+constexpr IrqFlags operator^(IrqFlags l, IrqFlags r)
+{
+    return static_cast<IrqFlags>(static_cast<uint32_t>(l) ^
+                                 static_cast<uint32_t>(r));
+}
+
+/// @brief Todas as flags que indicam que o radiotransmissor está ativamente
+/// recebendo uma mensagem.
+constexpr IrqFlags RECEIVING_FLAGS = (IRQ_PREAMBLE_DETECTED | IRQ_HEADER_VALID);
+
+/// @brief Todas as flags de IRQ modificáveis durante a recepção.
+constexpr IrqFlags ALL_RX_FLAGS =
+    (IRQ_RX_DONE | IRQ_HEADER_VALID | IRQ_PREAMBLE_DETECTED | IRQ_HEADER_ERR |
+     IRQ_CRC_ERR | IRQ_TIMEOUT);
+
+/// @brief Todas as flags de IRQ que representam um erro de recepção.
+constexpr IrqFlags RX_ERROR_FLAGS =
+    (IRQ_HEADER_ERR | IRQ_CRC_ERR | IRQ_TIMEOUT);
+
+/// @brief Todas as flags de IRQ modificáveis durante uma transmissão.
+constexpr IrqFlags ALL_TX_FLAGS = (IRQ_TX_DONE | IRQ_TIMEOUT);
 
 /**
  * @brief Uma estrutura com todos os parâmetros configuráveis genericamente
@@ -57,6 +107,25 @@ struct Parameters
     /// @warning Antes de definir a sync word, leia
     /// https://www.thethingsnetwork.org/forum/t/should-private-lorawan-networks-use-a-different-sync-word/34496/15
     uint8_t sync_word;
+
+    /// @brief `true` se os pacotes devem ser enviados e recebidos sem
+    /// cabeçalho.
+    bool implicit_header;
+
+    /**
+     * @brief Calcula o tempo de transmissão de 1 símbolo LoRa nesses
+     * parâmetros.
+     */
+    constexpr port::time_us calculate_symbol_time() const
+    {
+        return (1000000UL << spreading_factor) / bandwidth_hz;
+    };
+
+    constexpr port::time_us calculate_time_on_air(packet_length length) const
+    {
+        /// @todo
+        return 0;
+    }
 };
 
 /**
@@ -72,8 +141,8 @@ struct RecvConfig
     /// flags suportadas pelo radiotransmissor.
     IrqFlags irq_dispatch_mask;
 
-    /// @brief Comprimento do payload de 0-255 bytes. Se for diferente de 0,
-    /// esperará um pacote de cabeçalho implícito (sem cabeçalho LoRa).
+    /// @brief Comprimento esperado do payload de 0-255 bytes, necessário apenas
+    /// se o radiotransmissor estiver configurado com `implicit_header = true`.
     packet_length length;
 
     /// @brief `true` se o módulo deve continuar recebendo após receber um
@@ -88,15 +157,10 @@ struct SendConfig
 {
     /// @brief Um buffer com no mínimo `length` bytes compondo o payload da
     /// mensagem.
-    const char *data;
+    const uint8_t *data;
 
     /// @brief O comprimento do payload de 0-255 bytes.
     packet_length length;
-
-    /// @brief `true` se o pacote deve ser enviado sem cabeçalho. O módulo que
-    /// receber o pacote deve ser configurado para esperar por uma mensagem de
-    /// exatamente `length` bytes.
-    bool implicit_header;
 };
 
 /**
@@ -204,6 +268,28 @@ public:
     virtual StatusCode send(const SendConfig &cfg) = 0;
 
     /**
+     * @brief Obtém a intensidade do sinal recebido da última mensagem, em dBm.
+     * @returns Um par com o código de status da operação e o RSSI. Caso haja um
+     * erro, o RSSI deve ser ignorado.
+     * @return `StatusCode::ok` em caso de sucesso.
+     * @return `StatusCode::unsupported`
+     * @return `StatusCode::communication_failed`
+     * @return `StatusCode::communication_timed_out`
+     */
+    virtual etl::pair<StatusCode, float> get_rssi() = 0;
+
+    /**
+     * @brief Obtém a relação sinal-ruído da última mensagem, em dB.
+     * @returns Um par com o código de status da operação e o SNR. Caso haja um
+     * erro, o SNR deve ser ignorado.
+     * @return `StatusCode::ok` em caso de sucesso.
+     * @return `StatusCode::unsupported`
+     * @return `StatusCode::communication_failed`
+     * @return `StatusCode::communication_timed_out`
+     */
+    virtual etl::pair<StatusCode, float> get_snr() = 0;
+
+    /**
      * @brief Define um ISR para lidar com eventos despachados pelo
      * radiotransmissor.
      * @param isr O ISR a ser usado.
@@ -249,11 +335,14 @@ public:
 
     /**
      * @brief Obtém o payload da ultima mensagem recebida pelo radiotransmissor.
+     * @param data Um buffer de pelo menos `length` bytes. Lerá menos bytes caso
+     * o pacote tenha um comprimento menor que `length`.
+     * @param length O máximo de bytes que devem ser lidos.
      * @return `StatusCode::ok` em caso de sucesso.
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
      */
-    virtual StatusCode read_message(const char *data, packet_length length) = 0;
+    virtual StatusCode read_message(uint8_t *data, packet_length length) = 0;
 };
 
 }  // namespace lora

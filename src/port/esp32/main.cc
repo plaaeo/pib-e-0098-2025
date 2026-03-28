@@ -81,7 +81,7 @@ RTC_DATA_ATTR static struct
 sensor::ADS1X15Interface g_ADC;
 
 //< Interface para envio de leituras de sensor.
-lora::Protocol *g_Proto = nullptr;
+lora::IProtocol *g_Proto = nullptr;
 
 RTC_DATA_ATTR lora::State g_State = {
     .rt_state = {

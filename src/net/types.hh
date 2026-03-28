@@ -5,7 +5,6 @@
 
 #include "net/clock.hh"
 #include "net/trickle.hh"
-#include "port/types.hh"
 
 namespace net {
 using node_id = uint8_t;

@@ -1,8 +1,6 @@
 #pragma once
 
-#include "port/random.hh"
-#include "port/task.hh"
-#include "port/time.hh"
+#include "port/port.hh"
 
 namespace net {
 struct TrickleTimerState
@@ -15,25 +13,25 @@ struct TrickleTimerState
     uint8_t       interval_duration_doublings;
     uint8_t       max_interval_doublings;
 
-    /**
-     * @brief Calcula a duração do intervalo atual em microssegundos.
-     */
+    /// @brief Verifica se o timer está no intervalo máximo.
+    constexpr bool is_capped() const
+    {
+        return interval_duration_doublings == max_interval_doublings;
+    }
+
+    /// @brief Calcula a duração do intervalo atual em microssegundos.
     constexpr port::time_us calculate_interval_duration() const
     {
         return min_interval_us * (1U << interval_duration_doublings);
     }
 
-    /**
-     * @brief Calcula o tempo do fim do intervalo atual em microssegundos.
-     */
+    /// @brief Calcula o tempo do fim do intervalo atual em microssegundos.
     constexpr port::time_us calculate_interval_end_time() const
     {
         return interval_start_time_us + calculate_interval_duration();
     }
 
-    /**
-     * @brief Calcula um delay `t` aleatório dentro do intervalo [T/2, T).
-     */
+    /// @brief Calcula um delay `t` aleatório dentro do intervalo [T/2, T).
     inline port::time_us calculate_random_transmit_delay() const
     {
         auto t = (float)(port::random()) / UINT32_MAX;
@@ -47,11 +45,9 @@ struct TrickleTimerState
 class TrickleTimer
 {
 public:
-    TrickleTimer(port::Task        *task,
-                 uint32_t           notification,
-                 TrickleTimerState &state)
+    TrickleTimer(port::ISR isr, TrickleTimerState &state)
         : m_State(&state)
-        , m_Timer(task, notification)
+        , m_Timer(isr)
         , m_Running(false) {};
 
     /**
@@ -95,7 +91,7 @@ public:
 
 private:
     TrickleTimerState *m_State;
-    port::NotifyTimer  m_Timer;
+    port::Timer        m_Timer;
     bool               m_Running;
 };
 }  // namespace net

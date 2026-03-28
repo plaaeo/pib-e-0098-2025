@@ -69,7 +69,7 @@ bool schedule(EventTask &task) noexcept
                    auto task = static_cast<EventTask *>(arg);
 
                    // Sinalizar início do ciclo de execução
-                   task->on_enter();
+                   task->on_start();
 
                    port::event_bits ev;
                    for (;;) {
