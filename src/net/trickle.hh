@@ -59,9 +59,11 @@ public:
      * @param max_interval_doublings A quantidade máxima de vezes que o tamanho
      * do intervalo pode dobrar.
      */
-    void try_begin(uint32_t      redundancy_constant,
-                   port::time_us min_interval,
-                   uint8_t       max_interval_doublings);
+    void try_begin(
+        uint32_t      redundancy_constant,
+        port::time_us min_interval,
+        uint8_t       max_interval_doublings
+    );
 
     /**
      * @brief Interrompe a execução do trickle timer.

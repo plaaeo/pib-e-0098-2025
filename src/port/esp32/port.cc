@@ -83,7 +83,7 @@ bool schedule(EventTask &task) noexcept
                &task,                 // Argumento da função da task
                task.m_Priority,       // Prioridade da task
                &task.m_Impl           // Ponteiro para handle da task
-               ) == pdTRUE;
+           ) == pdTRUE;
 };
 
 void unschedule(EventTask &task) noexcept
@@ -121,7 +121,8 @@ Timer::Timer(port::ISR isr)
 #endif
 
     ESP_ERROR_CHECK(esp_timer_create(
-        &timer_cfg, reinterpret_cast<esp_timer_handle_t *>(&m_Impl)));
+        &timer_cfg, reinterpret_cast<esp_timer_handle_t *>(&m_Impl)
+    ));
 };
 
 //< Para e destroi o timer de alta resolução.
@@ -135,8 +136,9 @@ Timer::~Timer()
 
 void Timer::start_once(port::time_us duration)
 {
-    ESP_ERROR_CHECK(esp_timer_start_once(
-        static_cast<esp_timer_handle_t>(m_Impl), duration));
+    ESP_ERROR_CHECK(
+        esp_timer_start_once(static_cast<esp_timer_handle_t>(m_Impl), duration)
+    );
 };
 
 void Timer::stop()

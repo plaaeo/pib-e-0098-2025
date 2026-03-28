@@ -38,8 +38,9 @@ struct Rank
      */
     explicit constexpr operator uint8_t() const
     {
-        return ((static_cast<uint8_t>(hops) << 2) |
-                static_cast<uint8_t>(tiredness));
+        return (
+            (static_cast<uint8_t>(hops) << 2) | static_cast<uint8_t>(tiredness)
+        );
     }
 
     constexpr bool operator>(const Rank &other) const

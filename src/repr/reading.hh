@@ -39,16 +39,22 @@ constexpr static auto META_TEMPERATURE = LinearSensorCodec{
 };
 
 // Garantir que a codificação do pH tem erro menor que ±0.5 pH
-static_assert(META_PH.step() < 0.5f,
-              "O erro de (de)codificação do pH excede 0.5 pH");
+static_assert(
+    META_PH.step() < 0.5f,
+    "O erro de (de)codificação do pH excede 0.5 pH"
+);
 
 // Garantir que a codificação do TDS tem erro menor que ±10 ppm
-static_assert(META_TDS.step() < 10.0f,
-              "O erro de (de)codificação do TDS excede 10 ppm");
+static_assert(
+    META_TDS.step() < 10.0f,
+    "O erro de (de)codificação do TDS excede 10 ppm"
+);
 
 // Garantir que a codificação da temperatura tem erro menor que ±1°C.
-static_assert(META_TEMPERATURE.step() < 1.0f,
-              "O erro de (de)codificação da temperatura excede 1°C");
+static_assert(
+    META_TEMPERATURE.step() < 1.0f,
+    "O erro de (de)codificação da temperatura excede 1°C"
+);
 
 /**
  * @brief Representa uma estrutura `sensor::Reading` comprimida, utilizada para

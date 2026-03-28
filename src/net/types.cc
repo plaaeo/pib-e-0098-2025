@@ -43,8 +43,10 @@ void CandidateParents::add_or_update(ParentInfo &&info)
         }
 
         // Descartar pai antigo
-        PORT_LOGI(TAG, "discarding low-quality parent %hhu for %hhu",
-                  candidate_parents[worstIndex].id, info.id);
+        PORT_LOGI(
+            TAG, "discarding low-quality parent %hhu for %hhu",
+            candidate_parents[worstIndex].id, info.id
+        );
         candidate_parents.assign(worstIndex, info);
     } else {
         candidate_parents.push_back(info);
@@ -62,8 +64,9 @@ etl::optional<uint8_t> CandidateParents::sort_by_objective()
         return etl::nullopt;
 
     // Ordenar
-    etl::sort(candidate_parents.begin(), candidate_parents.end(),
-              compare_parent_info);
+    etl::sort(
+        candidate_parents.begin(), candidate_parents.end(), compare_parent_info
+    );
 
     return etl::optional<uint8_t>{ candidate_parents[0].id };
 };

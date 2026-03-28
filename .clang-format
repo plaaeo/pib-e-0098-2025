@@ -13,3 +13,6 @@ AlignConsecutiveDeclarations:
     Enabled: true
 AlignConsecutiveMacros:
     Enabled: true
+AlignAfterOpenBracket: BlockIndent
+IndentCaseLabels: false
+IndentCaseBlocks: false

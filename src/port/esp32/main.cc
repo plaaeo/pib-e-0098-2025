@@ -108,15 +108,17 @@ void task_sensor()
 
     // Tentar inicializar I2C do ADS1115
     if (!Wire.begin(ADS1115_SDA, ADS1115_SCL)) {
-        PORT_LOGW(TAG,
-                  "falha ao inicializar o I2C do ADS1X15, leituras não serão "
-                  "realizadas");
+        PORT_LOGW(
+            TAG,
+            "falha ao inicializar o I2C do ADS1X15, leituras não serão "
+            "realizadas"
+        );
     }
     // Tentar inicializar ADC externo
     else if (!g_ADC.begin(Wire)) {
         PORT_LOGW(
-            TAG,
-            "falha ao inicializar o ADS1X15, leituras não serão realizadas");
+            TAG, "falha ao inicializar o ADS1X15, leituras não serão realizadas"
+        );
     }
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
@@ -141,7 +143,8 @@ extern "C" void app_main(void)
     esp_log_level_set("*", ESP_LOG_DEBUG);
 
     ESP_ERROR_CHECK(
-        esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON));
+        esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON)
+    );
 
     // Configurar ESP para acordar do sono em casos de IRQ do radiotransmissor.
     ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(LORA_DIO0, 1));

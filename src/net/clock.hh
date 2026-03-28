@@ -30,8 +30,10 @@ struct Clock
      * momento exato em que o pacote foi recebido (deve ser executado ao receber
      * um IRQ do radio para maior precisão).
      */
-    void synchronize(port::time_us externalTimestamp_us,
-                     port::time_us monoTimeAtRx_us)
+    void synchronize(
+        port::time_us externalTimestamp_us,
+        port::time_us monoTimeAtRx_us
+    )
     {
         auto wallTimeAtRx_us = port::get_rtc_time();
         wallTimeAtRx_us -= port::get_monotonic_time() - monoTimeAtRx_us;

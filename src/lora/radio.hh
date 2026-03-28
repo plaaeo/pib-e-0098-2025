@@ -4,15 +4,17 @@
 
 #include "port/port.hh"
 
-#define LORA_ASSERT(expr)                                                      \
-    do {                                                                       \
-        ::lora::StatusCode ___LORA_ASSERT_EXPR = (expr);                       \
-        if (unlikely(___LORA_ASSERT_EXPR != ::lora::StatusCode::ok)) {         \
-            PORT_LOGE("lora",                                                  \
-                      __FILE__ " at line %u: assertion failed with status %u", \
-                      __LINE__, static_cast<::uint32_t>(___LORA_ASSERT_EXPR)); \
-            ::abort();                                                         \
-        }                                                                      \
+#define LORA_ASSERT(expr)                                                \
+    do {                                                                 \
+        ::lora::StatusCode ___LORA_ASSERT_EXPR = (expr);                 \
+        if (unlikely(___LORA_ASSERT_EXPR != ::lora::StatusCode::ok)) {   \
+            PORT_LOGE(                                                   \
+                "lora",                                                  \
+                __FILE__ " at line %u: assertion failed with status %u", \
+                __LINE__, static_cast<::uint32_t>(___LORA_ASSERT_EXPR)   \
+            );                                                           \
+            ::abort();                                                   \
+        }                                                                \
     } while (0);
 
 namespace lora {
@@ -46,20 +48,23 @@ constexpr IrqFlags operator~(IrqFlags r)
 
 constexpr IrqFlags operator|(IrqFlags l, IrqFlags r)
 {
-    return static_cast<IrqFlags>(static_cast<uint32_t>(l) |
-                                 static_cast<uint32_t>(r));
+    return static_cast<IrqFlags>(
+        static_cast<uint32_t>(l) | static_cast<uint32_t>(r)
+    );
 }
 
 constexpr IrqFlags operator&(IrqFlags l, IrqFlags r)
 {
-    return static_cast<IrqFlags>(static_cast<uint32_t>(l) &
-                                 static_cast<uint32_t>(r));
+    return static_cast<IrqFlags>(
+        static_cast<uint32_t>(l) & static_cast<uint32_t>(r)
+    );
 }
 
 constexpr IrqFlags operator^(IrqFlags l, IrqFlags r)
 {
-    return static_cast<IrqFlags>(static_cast<uint32_t>(l) ^
-                                 static_cast<uint32_t>(r));
+    return static_cast<IrqFlags>(
+        static_cast<uint32_t>(l) ^ static_cast<uint32_t>(r)
+    );
 }
 
 /// @brief Todas as flags que indicam que o radiotransmissor está ativamente

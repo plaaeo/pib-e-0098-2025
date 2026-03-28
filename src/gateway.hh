@@ -97,7 +97,8 @@ void setup()
     // connection issue or data read time out can be occurred.
     fbData.setBSSLBufferSize(
         2048 /* Rx buffer size in bytes from 512 - 16384 */,
-        1024 /* Tx buffer size in bytes from 512 - 16384 */);
+        1024 /* Tx buffer size in bytes from 512 - 16384 */
+    );
     Firebase.begin(&config, &auth);
 
     // Comment or pass false value when WiFi reconnection will control by your
@@ -141,13 +142,17 @@ void send_reading_firestore(const sens::Reading &reading)
         json.set("fields/valor/doubleValue", coleta.valor);
 
         // Criar documento no Firestore
-        if (Firebase.Firestore.createDocument(&fbData, FIREBASE_PROJECT_ID, "",
-                                              "leiturasSensores", json.raw())) {
-            PORT_LOGI(TAG, "Coleta de '%s' enviada para o Firestore",
-                      coleta.id);
+        if (Firebase.Firestore.createDocument(
+                &fbData, FIREBASE_PROJECT_ID, "", "leiturasSensores", json.raw()
+            )) {
+            PORT_LOGI(
+                TAG, "Coleta de '%s' enviada para o Firestore", coleta.id
+            );
         } else {
-            PORT_LOGE(TAG, "Falha ao enviar '%s' ao Firestore: %s", coleta.id,
-                      fbData.errorReason().c_str());
+            PORT_LOGE(
+                TAG, "Falha ao enviar '%s' ao Firestore: %s", coleta.id,
+                fbData.errorReason().c_str()
+            );
         }
     }
 }

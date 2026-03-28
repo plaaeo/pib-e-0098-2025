@@ -3,9 +3,11 @@
 namespace net {
 constexpr static auto TAG = "trickle";
 
-void TrickleTimer::try_begin(uint32_t      redundancy_constant,
-                             port::time_us min_interval,
-                             uint8_t       max_interval_doublings)
+void TrickleTimer::try_begin(
+    uint32_t      redundancy_constant,
+    port::time_us min_interval,
+    uint8_t       max_interval_doublings
+)
 {
     // Garantir que há estado
     if (m_State == nullptr)
@@ -31,8 +33,10 @@ void TrickleTimer::try_begin(uint32_t      redundancy_constant,
 
     m_State->interval_start_time_us = port::get_rtc_time();
 
-    PORT_LOGD(TAG, "initialized timer (k = %u, I = %lluus, t = %lluus)",
-              redundancy_constant, min_interval, m_State->transmit_delay);
+    PORT_LOGD(
+        TAG, "initialized timer (k = %u, I = %lluus, t = %lluus)",
+        redundancy_constant, min_interval, m_State->transmit_delay
+    );
 
     m_Running = true;
 };
@@ -55,7 +59,8 @@ bool TrickleTimer::update_and_check()
     PORT_LOGD(
         TAG,
         "timed out (count = %u, start = %lluus, now = %lluus, end = %lluus)",
-        m_State->counter, m_State->interval_start_time_us, timeNow, endTime);
+        m_State->counter, m_State->interval_start_time_us, timeNow, endTime
+    );
 
     if (timeNow < endTime) {
         // Agendar timer para o fim do intervalo
@@ -75,9 +80,11 @@ bool TrickleTimer::update_and_check()
 
     m_State->interval_start_time_us = port::get_rtc_time();
 
-    PORT_LOGD(TAG, "extended timer (I(%hhu) = %lluus, t = %lluus)",
-              m_State->interval_duration_doublings,
-              m_State->calculate_interval_duration(), m_State->transmit_delay);
+    PORT_LOGD(
+        TAG, "extended timer (I(%hhu) = %lluus, t = %lluus)",
+        m_State->interval_duration_doublings,
+        m_State->calculate_interval_duration(), m_State->transmit_delay
+    );
 
     return false;
 };
@@ -102,8 +109,10 @@ void TrickleTimer::signal_inconsistency()
         stop();
 
         // Iniciar novo intervalo com as mesmas constantes
-        try_begin(m_State->redundancy_constant, m_State->min_interval_us,
-                  m_State->max_interval_doublings);
+        try_begin(
+            m_State->redundancy_constant, m_State->min_interval_us,
+            m_State->max_interval_doublings
+        );
     }
 };
 }  // namespace net
