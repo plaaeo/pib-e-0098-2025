@@ -7,20 +7,23 @@
 #include "net/trickle.hh"
 #include "net/types.hh"
 
-#include "lora/proto.hh"
+#include "lora/radio.hh"
+
+#include "sensor/reading.hh"
+
 #include "port/port.hh"
 
 namespace lora {
-enum class ExperimentalFSM
+enum class StaggeredFSM
 {
     /// @brief Valor padrão após a construção inicial da máquina.
     INITIALIZED = 0,
 
     /// @brief O nó está aguardando por broadcasts de vizinhos.
-    SCANNING_CANDIDATE_NEIGHBORS,
+    RECEIVING_BROADCASTS,
 
     /// @brief O nó está realizando um broadcast.
-    BROADCASTING,
+    SENDING_BROADCAST,
 
     /// @todo Implementar os próximos estados reais da rede.
     EXECUTING,
@@ -28,7 +31,7 @@ enum class ExperimentalFSM
 
 struct RuntimeState
 {
-    ExperimentalFSM fsm;
+    StaggeredFSM fsm;
 
     /// @brief O tempo esperado da função `net::Clock::get_time_us()` ao acordar
     /// do slot timer.
@@ -38,31 +41,38 @@ struct RuntimeState
     port::time_us slot_timer_calibration;
 };
 
-using State = net::State<RuntimeState>;
+/**
+ * @brief Uma estrutura contendo o estado da rede e do protocolo. Deve ser
+ * armazenado de forma persistente entre ciclos de sono do dispositivo.
+ */
+using PersistentState = net::State<RuntimeState>;
 
-class ExperimentalProtocol : public IProtocol, private port::EventTask
+class StaggeredProtocol : private port::EventTask
 {
-protected:
-    ExperimentalProtocol(lora::IAsyncRadio &phys, State &state);
-
 public:
-    /**
-     * @brief Cria uma instância do protocolo experimental.
-     * @param phys O radiotransmissor a ser utilizado.
-     * @warning Apenas uma instância da classe `ExperimentalProtocol` pode
-     * existir a qualquer momento da execução.
-     * @returns A instância criada, ou `nullptr` caso já exista outra instância.
-     */
-    static ExperimentalProtocol *create(lora::IAsyncRadio &phys, State &state);
+    StaggeredProtocol(lora::IAsyncRadio &phys, PersistentState &state);
 
     /**
      * @brief Agenda a transmissão de uma leitura de sensor quando possível.
      * @param reading A leitura realizada pelo nó sensor.
-     * @returns `true` se foi possível agendar a transmissão.
      */
-    bool schedule(const sensor::Reading &reading) override;
+    void schedule(const sensor::Reading &reading);
 
 private:
+    /**
+     * @brief Chamado após qualquer transição de estado.
+     */
+    void on_state_enter();
+
+    /**
+     * @brief Chamado para processar um evento recente ou enfileirado,
+     * dependendo do estado da rede e do protocolo.
+     * @param[inout] events Um bitset com os eventos recebidos. Deve ser
+     * modificado para limpar eventos resolvidos.
+     * @returns O próximo estado do protocolo.
+     */
+    StaggeredFSM on_state_event(port::event_bits &events);
+
     /**
      * @brief Função principal da task do protocolo experimental.
      */
@@ -94,7 +104,9 @@ private:
     void sleep_until_next_slot();
 
 private:
-    State &m_State;
+    lora::IAsyncRadio &m_Phys;
+
+    PersistentState &m_State;
 
     lora::Parameters m_Params;
 

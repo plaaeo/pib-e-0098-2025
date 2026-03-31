@@ -83,19 +83,21 @@ sensor::ADS1X15Interface g_ADC;
 //< Interface para envio de leituras de sensor.
 lora::IProtocol *g_Proto = nullptr;
 
-RTC_DATA_ATTR lora::State g_State = {
-    .rt_state = {
-        //< Aproximadamente o tempo de inicialização do ESP32-S3 durante deep sleep, descoberto experimentalmente.
-        .slot_timer_calibration = -1000000,
-    },
-    .trickle = { },
-    .net_time = { },
-    .slot_info = { },
+RTC_DATA_ATTR lora::PersistentState g_State = {
+    .rt_state =
+        {
+            //< Aproximadamente o tempo de inicialização do ESP32-S3 durante
+            // deep sleep, descoberto experimentalmente.
+            .slot_timer_calibration = -1000000,
+        },
+    .trickle = {},
+    .net_time = {},
+    .slot_info = {},
     .id = UINT8_MAX,
     .rank = net::infinite_rank,
     .max_hops = net::UNKNOWN_MAX_HOPS,
     .has_children = false,
-    .candidate_parents = { },
+    .candidate_parents = {},
 };
 
 /**
@@ -127,7 +129,7 @@ void task_sensor()
 
     g_State.id = s_Phys.randomByte();
 
-    g_Proto = lora::ExperimentalProtocol::create(&s_Phys, g_State);
+    g_Proto = lora::StaggeredProtocol::create(&s_Phys, g_State);
 }
 
 //< Função `main` do protótipo

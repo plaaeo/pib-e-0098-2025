@@ -1,7 +1,7 @@
 ---
 BasedOnStyle: Chromium
 BreakBeforeBraces: Mozilla
-Cpp11BracedListStyle: false
+Cpp11BracedListStyle: true
 IndentPPDirectives: AfterHash
 IndentWidth: 4
 AccessModifierOffset: -4

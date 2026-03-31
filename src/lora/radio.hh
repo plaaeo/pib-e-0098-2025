@@ -205,6 +205,11 @@ enum class StatusCode
 
     /// @brief Tentativa de configurar uma sync word não suportada.
     unsupported_sync_word,
+
+    /// @brief Outro erro, provavelmente específico da biblioteca ou
+    /// radiotransmissor utilizado. O erro deve ser impresso usando `PORT_LOGD`
+    /// para debugging.
+    other,
 };
 
 /**
@@ -228,6 +233,7 @@ public:
      * @return `StatusCode::unsupported_sync_word`
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual StatusCode set_parameters(const Parameters &params) = 0;
 
@@ -237,6 +243,7 @@ public:
      * @return `StatusCode::unsupported`
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual StatusCode standby() = 0;
 
@@ -247,6 +254,7 @@ public:
      * @return `StatusCode::unsupported`
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual StatusCode sleep() = 0;
 
@@ -258,6 +266,7 @@ public:
      * @return `StatusCode::unsupported`
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual StatusCode recv(const RecvConfig &cfg) = 0;
 
@@ -269,6 +278,7 @@ public:
      * @return `StatusCode::unsupported`
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual StatusCode send(const SendConfig &cfg) = 0;
 
@@ -280,6 +290,7 @@ public:
      * @return `StatusCode::unsupported`
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual etl::pair<StatusCode, float> get_rssi() = 0;
 
@@ -291,6 +302,7 @@ public:
      * @return `StatusCode::unsupported`
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual etl::pair<StatusCode, float> get_snr() = 0;
 
@@ -314,6 +326,7 @@ public:
      * @return `StatusCode::ok` em caso de sucesso.
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual etl::pair<StatusCode, IrqFlags> get_flags() = 0;
 
@@ -324,6 +337,7 @@ public:
      * @return `StatusCode::ok` em caso de sucesso.
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual StatusCode clear_flags(IrqFlags mask) = 0;
 
@@ -335,6 +349,7 @@ public:
      * @return `StatusCode::ok` em caso de sucesso.
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual etl::pair<StatusCode, packet_length> get_message_length() = 0;
 
@@ -346,6 +361,7 @@ public:
      * @return `StatusCode::ok` em caso de sucesso.
      * @return `StatusCode::communication_failed`
      * @return `StatusCode::communication_timed_out`
+     * @return `StatusCode::other`
      */
     virtual StatusCode read_message(uint8_t *data, packet_length length) = 0;
 };

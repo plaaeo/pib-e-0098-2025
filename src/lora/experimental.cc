@@ -8,56 +8,36 @@
 constexpr static auto TAG = "proto.experimental";
 
 namespace lora {
-static ExperimentalProtocol *g_Instance = nullptr;
-
 constexpr port::event_bits EVENT_IRQ = (1U << 0);
 constexpr port::event_bits EVENT_KILL = (1U << 1);
 constexpr port::event_bits EVENT_TIMER = (1U << 2);
 constexpr port::event_bits EVENT_TRICKLE = (1U << 3);
 
-ExperimentalProtocol::ExperimentalProtocol(
+StaggeredProtocol::StaggeredProtocol(
     lora::IAsyncRadio &phys,
-    State             &state
+    PersistentState   &state
 )
-    : IProtocol(phys)
-    , port::EventTask(2)
+    : port::EventTask(2)
+    , m_Phys(phys)
     , m_State(state)
-    , m_Params(
-          { .freq_hz = 915000000,
-            .bandwidth_hz = 125000,
-            .preamble_length = 12,
-            .power_db = 5,
-            .spreading_factor = 12,
-            .coding_rate = 5,
-            .sync_word = 0x77 }
-      )
+    , m_Params({
+          .freq_hz = 915000000,
+          .bandwidth_hz = 125000,
+          .preamble_length = 12,
+          .power_db = 5,
+          .spreading_factor = 12,
+          .coding_rate = 5,
+          .sync_word = 0x77,
+      })
     , m_MonoTimeAtISR_us(0)
     , m_TimeoutTimer(port::make_event_isr<EVENT_TIMER>(*this))
     , m_Trickle(port::make_event_isr<EVENT_TRICKLE>(*this), state.trickle) {};
 
-/**
- * @brief Cria uma instância do protocolo experimental.
- * @param phys O radiotransmissor a ser utilizado.
- * @warning Apenas uma instância da classe `ExperimentalProtocol` pode
- * existir a qualquer momento da execução.
- * @returns A instância criada, ou `nullptr` caso já exista outra instância.
- */
-ExperimentalProtocol *
-ExperimentalProtocol::create(lora::IAsyncRadio &phys, State &state)
-{
-    if (g_Instance)
-        return nullptr;
+void StaggeredProtocol::schedule(const sensor::Reading &reading) {
 
-    g_Instance = new ExperimentalProtocol(phys, state);
-    return g_Instance;
 };
 
-bool ExperimentalProtocol::schedule(const sensor::Reading &reading)
-{
-    return false;
-};
-
-bool ExperimentalProtocol::process_broadcast(const net::Broadcast &packet)
+bool StaggeredProtocol::process_broadcast(const net::Broadcast &packet)
 {
     bool reportInconsistency = false;
 
@@ -90,8 +70,7 @@ bool ExperimentalProtocol::process_broadcast(const net::Broadcast &packet)
          * realmente finalizou.
          */
         auto symbolTime_us = m_Params.calculate_symbol_time();
-        auto transmissionEndTime_us =
-            g_Instance->m_MonoTimeAtISR_us - symbolTime_us;
+        auto transmissionEndTime_us = m_MonoTimeAtISR_us - symbolTime_us;
 
         m_State.net_time.synchronize(
             packet.reference_time_us, transmissionEndTime_us
@@ -141,20 +120,18 @@ bool ExperimentalProtocol::process_broadcast(const net::Broadcast &packet)
 
     // Salvar caso o nó escutado seja um potencial pai
     if (m_State.rank.hops == packet.rank.hops + 1) {
-        m_State.candidate_parents.add_or_update(
-            {
-                .last_rssi = rssi,
-                .last_snr = snr,
-                .id = packet.id,
-                .rank = packet.rank,
-            }
-        );
+        m_State.candidate_parents.add_or_update({
+            .last_rssi = rssi,
+            .last_snr = snr,
+            .id = packet.id,
+            .rank = packet.rank,
+        });
     }
 
     return reportInconsistency;
 };
 
-void ExperimentalProtocol::sleep_until_next_slot()
+void StaggeredProtocol::sleep_until_next_slot()
 {
     auto &si = m_State.slot_info;
 
@@ -188,7 +165,7 @@ void ExperimentalProtocol::sleep_until_next_slot()
     esp_deep_sleep(timeUntilNextSlot + m_State.rt_state.slot_timer_calibration);
 }
 
-void ExperimentalProtocol::handle_broadcast_recv(lora::IrqFlags flags)
+void StaggeredProtocol::handle_broadcast_recv(lora::IrqFlags flags)
 {
     // Caso seja `false`, o radio foi utilizado por outro código além deste.
     if (~flags & lora::IRQ_RX_DONE) {
@@ -220,10 +197,11 @@ void ExperimentalProtocol::handle_broadcast_recv(lora::IrqFlags flags)
     }
 
     // Reportar inconsistência caso o estado mude
-    if (process_broadcast(*packet))
+    if (process_broadcast(*packet)) {
         m_Trickle.signal_inconsistency();
-    else
+    } else {
         m_Trickle.signal_consistency();
+    }
 
     // Iniciar o trickle caso ele ainda não esteja iniciado.
     m_Trickle.try_begin(
@@ -234,50 +212,73 @@ void ExperimentalProtocol::handle_broadcast_recv(lora::IrqFlags flags)
     );
 }
 
-port::event_bits ExperimentalProtocol::on_event(port::event_bits events)
+void StaggeredProtocol::on_state_enter()
 {
     switch (m_State.rt_state.fsm) {
-    case ExperimentalFSM::BROADCASTING: {
-        // Verificar se o evento recebido é gerenciável nesse estado
-        if (~events & EVENT_IRQ)
-            return events;
-
-        events &= ~EVENT_IRQ;
-
-        auto [status, flags] = m_Phys.get_flags();
-        LORA_ASSERT(status);
-
-        // Caso não tenha IRQ_TX_DONE
-        if (~flags & lora::IRQ_TX_DONE) {
-            PORT_LOGW(
-                TAG, "broadcast irq without `TX_DONE` (flags = %u)",
-                static_cast<uint32_t>(flags)
-            );
-
-            return events;
-        }
-
-        m_Phys.clear_flags(lora::ALL_TX_FLAGS);
-        PORT_LOGI(TAG, "TRANSMITTED - rebroadcast done");
-    }
-        [[fallthrough]];
-    case ExperimentalFSM::INITIALIZED:
-        PORT_LOGI(TAG, "RECEIVING - starting broadcast rx session");
+    case StaggeredFSM::RECEIVING_BROADCASTS: {
+        PORT_LOGI(TAG, "starting broadcast rx session");
 
         // Iniciar recepção sem timeout
-        LORA_ASSERT(m_Phys.recv(
-            {
-                .irq_flags_mask = lora::ALL_RX_FLAGS,
-                .irq_dispatch_mask = lora::IRQ_RX_DONE,
-                .length = 0,
-                .continuous = true,
-            }
-        ));
+        LORA_ASSERT(m_Phys.recv({
+            .irq_flags_mask = lora::ALL_RX_FLAGS,
+            .irq_dispatch_mask = lora::IRQ_RX_DONE,
+            .length = 0,
+            .continuous = true,
+        }));
 
-        m_State.rt_state.fsm = ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS;
+        return;
+    };
 
-        [[fallthrough]];
-    case ExperimentalFSM::SCANNING_CANDIDATE_NEIGHBORS: {
+    case StaggeredFSM::SENDING_BROADCAST: {
+        net::Broadcast broadcast = {
+            .reference_time_us = 0,
+            .id = m_State.id,
+            .rank = m_State.rank,
+            .slot_info = m_State.slot_info,
+            .max_hops = m_State.max_hops,
+        };
+
+        // Atualizar o tempo de referência no broadcast para
+        // refletir o tempo de processamento do pacote e o tempo
+        // esperado de transmissão.
+        //
+        // Isso não garante sincronia com o próximo nó. Há um
+        // pequeno erro acumulado em cada retransmissão equivalente a:
+        // - O tempo de codificar o broadcast em um pacote;
+        // - O tempo de comunicar com o radiotransmissor o pacote a ser enviado;
+        // - O tempo de comunicar o radiotransmissor a iniciar a transmissão;
+        // - O tempo do radiotransmissor realmente iniciar a transmissão. Após a
+        // recepcão do próximo nó, ainda há um pequeno delay não deterministico
+        // de processamento necessário para o radiotransmissor conseguir
+        // demodular o pacote e corrigir erros.
+        size_t length = broadcast.length();
+
+        broadcast.reference_time_us += m_Params.calculate_time_on_air(length);
+        broadcast.reference_time_us += m_State.net_time.get_time_us();
+
+        // Codificar o buffer
+        uint8_t buffer[length];
+        assert(broadcast.encode(buffer, length));
+
+        // Realizar a retransmissão
+        LORA_ASSERT(m_Phys.send({
+            .data = buffer,
+            .length = length,
+        }));
+
+        PORT_LOGI(
+            TAG, "transmitting broadcast (max_hops = %hhu)", m_State.max_hops
+        );
+
+        return;
+    };
+    }
+};
+
+StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
+{
+    switch (m_State.rt_state.fsm) {
+    case StaggeredFSM::RECEIVING_BROADCASTS: {
         auto [status, flags] = m_Phys.get_flags();
         LORA_ASSERT(status);
 
@@ -292,178 +293,137 @@ port::event_bits ExperimentalProtocol::on_event(port::event_bits events)
         if (events & EVENT_TRICKLE) {
             events &= ~EVENT_TRICKLE;
 
+            // Verificar se podemos iniciar uma transmissão
             if (!m_Trickle.update_and_check())
-                return events;
+                return StaggeredFSM::RECEIVING_BROADCASTS;
 
-            /**
-             * Não há necessidade de cancelar uma recepção para iniciar
-             * uma transmissão, pois nós vizinhos terão dificuldade de
-             * ouvir este broadcast, e adicionar uma transmissão apenas
-             * poluiria o canal.
-             */
+            // Não há necessidade de cancelar uma recepção para iniciar
+            // uma transmissão, pois adicionar uma transmissão concorrente
+            // apenas poluiria o canal, e nós vizinhos teriam dificuldade de
+            // ouvir este broadcast.
             if ((flags & RECEIVING_FLAGS) == RECEIVING_FLAGS) {
                 PORT_LOGI(
                     TAG, "suppressed broadcast due to channel occupation"
                 );
-                return events;
+                return StaggeredFSM::RECEIVING_BROADCASTS;
             }
 
-            /**
-             * Se o Trickle estiver executando um intervalo máximo, e
-             * nenhum nó filho foi detectado até agora, anunciar
-             * `max_hops` como `m_State.rank.hops`, e definir
-             * `m_State.max_hops` igualmente.
-             */
-            if (!m_State.has_children &&
-                m_State.max_hops == net::UNKNOWN_MAX_HOPS &&
-                m_State.trickle.is_capped()) {
-                m_State.max_hops = m_State.rank.hops;
-                PORT_LOGI(
-                    TAG, "adopted initial guess for max_hops as %hhu",
-                    m_State.max_hops
-                );
-                m_Trickle.signal_inconsistency();
-            }
+            // Caso não estejamos no tempo máximo do trickle, sempre devemos
+            // transmitir
+            if (!m_State.trickle.is_capped())
+                return StaggeredFSM::SENDING_BROADCAST;
 
-            net::Broadcast broadcast = {
-                .reference_time_us =
-                    static_cast<int32_t>(m_State.net_time.get_time_us()),
-                .id = m_State.id,
-                .rank = m_State.rank,
-                .slot_info = m_State.slot_info,
-                .max_hops = m_State.max_hops,
-            };
+            // Decidir se a rede está estável ou não
+            if (m_State.max_hops == net::UNKNOWN_MAX_HOPS) {
+                // Não conhecemos `max_hops`, mas sabemos que não possuímos nós
+                // filhos, logo, vamos chutar que nós estamos no `max_hops`
+                if (!m_State.has_children) {
+                    m_State.max_hops = m_State.rank.hops;
 
-            /**
-             * Atualizar o tempo de referência no broadcast para
-             * refletir o tempo de processamento do pacote e o tempo
-             * esperado de transmissão.
-             *
-             * Isso não garante sincronia com o próximo nó. Há um
-             * pequeno erro acumulado em cada retransmissão equivalente
-             * a:
-             * - O tempo de codificar o broadcast em um pacote;
-             * - O tempo de comunicar com o radiotransmissor o pacote a
-             * ser enviado;
-             * - O tempo de comunicar o radiotransmissor a iniciar a
-             * transmissão;
-             * - O tempo do radiotransmissor realmente iniciar a
-             * transmissão. Após a recepcão do próximo nó, ainda há um
-             * pequeno delay não deterministico de processamento
-             * necessário para o radiotransmissor conseguir demodular o
-             * pacote e corrigir erros.
-             */
-            size_t length = broadcast.length();
-            broadcast.reference_time_us +=
-                m_Params.calculate_time_on_air(length);
+                    PORT_LOGI(
+                        TAG, "adopted initial guess for max_hops as %hhu",
+                        m_State.max_hops
+                    );
 
-            // Codificar o buffer
-            uint8_t buffer[length];
-            assert(broadcast.encode(buffer, length));
-
-            // Realizar a retransmissão
-            LORA_ASSERT(m_Phys.send(
-                {
-                    .data = buffer,
-                    .length = length,
+                    m_Trickle.signal_inconsistency();
                 }
-            ));
-
-            PORT_LOGI(
-                TAG,
-                "TRANSMITTING - unsuppressed broadcast (max_hops "
-                "= %hhu)",
-                m_State.max_hops
-            );
-
-            // Após o trickle atingir o intervalo máximo, assumimos que
-            // a rede está estável, mas apenas se soubermos `max_hops`.
-            if (m_State.max_hops != net::UNKNOWN_MAX_HOPS &&
-                m_State.trickle.is_capped()) {
+            } else {
+                // Conhecemos o `max_hops` e o trickle atingiu o tempo máximo
+                // novamente, logo, a rede está estável.
                 PORT_LOGI(TAG, "network is stable");
 
-                // Stop transmission/reception and clear all flags
+                // Limpar timers e estado do phys LoRa.
                 LORA_ASSERT(m_Phys.standby());
                 m_Phys.clear_flags(lora::ALL_RX_FLAGS | lora::ALL_TX_FLAGS);
-
                 m_Trickle.stop();
 
-                m_State.rt_state.fsm = ExperimentalFSM::EXECUTING;
-                sleep_until_next_slot();
-                return events;
+                return StaggeredFSM::EXECUTING;
             }
 
-            m_State.rt_state.fsm = ExperimentalFSM::BROADCASTING;
-            return events;
+            return StaggeredFSM::SENDING_BROADCAST;
         }
 
-        return events;
-    }; break;
+        return StaggeredFSM::RECEIVING_BROADCASTS;
+    };
 
-    case ExperimentalFSM::EXECUTING: {
-        port::time_us now = m_State.net_time.get_time_us();
+    case StaggeredFSM::SENDING_BROADCAST: {
+        // Verificar se o evento recebido é gerenciável nesse estado
+        if (~events & EVENT_IRQ)
+            return StaggeredFSM::SENDING_BROADCAST;
 
-        if (events & EVENT_TIMER) {
-            events &= ~EVENT_TIMER;
+        // Marca o evento de IRQ como tratado
+        events &= ~EVENT_IRQ;
 
-            // Calibrar o tempo de início do slot com o RTC
-            auto calibDiff = m_State.rt_state.expected_slot_wakeup_time - now;
-            m_State.rt_state.slot_timer_calibration += calibDiff;
+        auto [status, flags] = m_Phys.get_flags();
+        LORA_ASSERT(status);
 
-            PORT_LOGI(TAG, "wakeup time difference: %lli", calibDiff);
+        // Verificar se a interrupção foi por algum motivo desconhecido
+        if (~flags & lora::IRQ_TX_DONE) {
+            PORT_LOGW(
+                TAG, "broadcast IRQd without `TX_DONE` (flags = %u)",
+                static_cast<uint32_t>(flags)
+            );
 
-            gpio_set_level(STATUS_LED, HIGH);
-            gpio_hold_en(STATUS_LED);
-
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-            gpio_hold_dis(STATUS_LED);
-            gpio_set_level(STATUS_LED, LOW);
-            sleep_until_next_slot();
+            return StaggeredFSM::SENDING_BROADCAST;
         }
 
-        return events;
-    }; break;
+        m_Phys.clear_flags(lora::ALL_TX_FLAGS);
+        PORT_LOGI(TAG, "rebroadcast done");
 
-    default: {
-        ESP_LOGE(TAG, "FSM reached undefined state");
-        abort();
-    }; break;
+        return StaggeredFSM::RECEIVING_BROADCASTS;
+    };
+
+    case StaggeredFSM::EXECUTING: {
+    }
     }
 };
 
-/**
- * @brief Função principal da task do protocolo experimental.
- */
-void ExperimentalProtocol::on_start()
+void StaggeredProtocol::on_start()
 {
-    // Configurar ISR
-    m_Phys.set_isr(
-        {
-            .function =
-                [](void *arg) {
-                    auto self = static_cast<ExperimentalProtocol *>(arg);
+    auto isr = [](void *arg) {
+        auto self = static_cast<StaggeredProtocol *>(arg);
 
-                    self->m_MonoTimeAtISR_us = port::get_monotonic_time();
-                    self->dispatch_events(EVENT_IRQ);
-                },
-            .argument = this,
-        }
-    );
+        self->m_MonoTimeAtISR_us = port::get_monotonic_time();
+        self->dispatch_events(EVENT_IRQ);
+    };
+
+    // Configurar ISR
+    m_Phys.set_isr({
+        .function = isr,
+        .argument = this,
+    });
 
     // Configurar parâmetros iniciais conhecidos padrão
     m_Phys.set_parameters(m_Params);
 
     // Transmitir mensagem falsa de início de broadcast
-    if (m_State.rt_state.fsm == ExperimentalFSM::INITIALIZED) {
-        m_Phys.send(
-            {
-                .data =
-                    (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x02\x40\x01\x04",
-                .length = 10,
-            }
-        );
+    if (m_State.rt_state.fsm == StaggeredFSM::INITIALIZED) {
+        m_Phys.send({
+            .data = (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x02\x40\x01\x04",
+            .length = 10,
+        });
     }
 }
 
+port::event_bits StaggeredProtocol::on_event(port::event_bits events)
+{
+    bool didChangeState = true;
+
+    do {
+        auto nextState = on_state_event(events);
+
+        didChangeState = nextState != m_State.rt_state.fsm;
+
+        // Se houve mudança de estado, executar `on_state_enter()` do novo
+        // estado.
+        if (didChangeState) {
+            m_State.rt_state.fsm = nextState;
+            on_state_enter();
+        }
+
+        // Re-executar `on_state_event()` mais cedo caso haja evento enfileirado
+    } while (didChangeState && events != 0);
+
+    return events;
+};
 }  // namespace lora
