@@ -162,7 +162,10 @@ void StaggeredProtocol::sleep_until_next_slot()
     timeUntilNextSlot = frameDuration - timeUntilNextSlot;
 
     m_State.rt_state.expected_slot_wakeup_time = now + timeUntilNextSlot;
-    esp_deep_sleep(timeUntilNextSlot + m_State.rt_state.slot_timer_calibration);
+
+    port::enter_deep_sleep(
+        timeUntilNextSlot + m_State.rt_state.slot_timer_calibration
+    );
 }
 
 void StaggeredProtocol::handle_broadcast_recv(lora::IrqFlags flags)
@@ -215,6 +218,16 @@ void StaggeredProtocol::handle_broadcast_recv(lora::IrqFlags flags)
 void StaggeredProtocol::on_state_enter()
 {
     switch (m_State.rt_state.fsm) {
+    case StaggeredFSM::INITIALIZED: {
+        // Envia um broadcast falso
+        m_Phys.send({
+            .data = (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x02\x40\x01\x04",
+            .length = 10,
+        });
+
+        return;
+    }
+
     case StaggeredFSM::RECEIVING_BROADCASTS: {
         PORT_LOGI(TAG, "starting broadcast rx session");
 
@@ -272,6 +285,10 @@ void StaggeredProtocol::on_state_enter()
 
         return;
     };
+
+    case StaggeredFSM::WAITING_TO_RX: {
+        sleep_until_next_slot();
+    }
     }
 };
 
@@ -337,7 +354,7 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
                 m_Phys.clear_flags(lora::ALL_RX_FLAGS | lora::ALL_TX_FLAGS);
                 m_Trickle.stop();
 
-                return StaggeredFSM::EXECUTING;
+                return StaggeredFSM::WAITING_TO_RX;
             }
 
             return StaggeredFSM::SENDING_BROADCAST;
@@ -346,10 +363,11 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
         return StaggeredFSM::RECEIVING_BROADCASTS;
     };
 
+    case StaggeredFSM::INITIALIZED:
     case StaggeredFSM::SENDING_BROADCAST: {
         // Verificar se o evento recebido é gerenciável nesse estado
         if (~events & EVENT_IRQ)
-            return StaggeredFSM::SENDING_BROADCAST;
+            return m_State.rt_state.fsm;
 
         // Marca o evento de IRQ como tratado
         events &= ~EVENT_IRQ;
@@ -364,17 +382,14 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
                 static_cast<uint32_t>(flags)
             );
 
-            return StaggeredFSM::SENDING_BROADCAST;
+            return m_State.rt_state.fsm;
         }
 
         m_Phys.clear_flags(lora::ALL_TX_FLAGS);
-        PORT_LOGI(TAG, "rebroadcast done");
+        PORT_LOGI(TAG, "broadcast done");
 
         return StaggeredFSM::RECEIVING_BROADCASTS;
     };
-
-    case StaggeredFSM::EXECUTING: {
-    }
     }
 };
 
@@ -396,13 +411,13 @@ void StaggeredProtocol::on_start()
     // Configurar parâmetros iniciais conhecidos padrão
     m_Phys.set_parameters(m_Params);
 
-    // Transmitir mensagem falsa de início de broadcast
-    if (m_State.rt_state.fsm == StaggeredFSM::INITIALIZED) {
-        m_Phys.send({
-            .data = (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x02\x40\x01\x04",
-            .length = 10,
-        });
+    // O estado `WAITING_TO_RX` entra em deep sleep, e a transição ocorre ao
+    // acordar do deep sleep.
+    if (m_State.rt_state.fsm == StaggeredFSM::WAITING_TO_RX) {
+        m_State.rt_state.fsm = StaggeredFSM::RECEIVING_FROM_CHILDREN;
     }
+
+    on_state_enter();
 }
 
 port::event_bits StaggeredProtocol::on_event(port::event_bits events)

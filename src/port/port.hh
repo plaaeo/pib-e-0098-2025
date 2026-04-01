@@ -83,6 +83,16 @@ bool schedule(class EventTask &task) noexcept;
 void unschedule(class EventTask &task) noexcept;
 
 /**
+ * @brief Coloca o dispositivo em sono profundo, interrompendo a execução de
+ * código. Após `duration` microssegundos, o dispositivo reiniciará.
+ *
+ * @note Definido pela plataforma.
+ * @todo Num futuro distante, implementar `schedule_deep_sleep`, permitindo deep
+ * sleeps concorrentes entre tasks.
+ */
+void enter_deep_sleep(port::time_us duration) noexcept;
+
+/**
  * @brief Usado como uma abstração para a implementação de tasks possívelmente
  * concorrentes, dependendo da plataforma.
  */

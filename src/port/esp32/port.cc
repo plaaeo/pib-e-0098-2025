@@ -1,6 +1,7 @@
 #include "port/port.hh"
 
 #include <esp_random.h>
+#include <esp_sleep.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -12,7 +13,7 @@
 #    define PORT_HAS_ISR_DISPATCH 0
 #endif
 
-#define PORT_TASK_STACK_SIZE 4096
+#define PORT_TASK_STACK_SIZE 2048
 
 namespace port {
 
@@ -38,24 +39,31 @@ port::time_us get_rtc_time()
     return static_cast<port::time_us>(esp_rtc_get_time_us());
 }
 
+PORT_ISR_SAFE static void
+internal_mark_for_execution(TaskHandle_t hndl, event_bits ev) noexcept
+{
+    // Verificar se devemos acordar a task normalmente ou no contexto de uma ISR
+    if (xPortInIsrContext()) {
+        BaseType_t shouldYield;
+        xTaskNotifyFromISR(hndl, ev, eSetBits, &shouldYield);
+
+        /** @todo Verificar se é válido chamar portYIELD_FROM_ISR várias vezes
+         */
+        if (g_IsInISRTimer && shouldYield)
+            return esp_timer_isr_dispatch_need_yield();
+
+        portYIELD_FROM_ISR(shouldYield);
+    } else {
+        xTaskNotify(hndl, ev, eSetBits);
+    }
+}
+
 PORT_ISR_SAFE void EventTask::mark_for_execution(event_bits ev) const noexcept
 {
     if (m_Impl == nullptr)
         return;
 
-    BaseType_t   shouldYield;
-    TaskHandle_t hndl = reinterpret_cast<TaskHandle_t>(m_Impl);
-
-    // Acordar task
-    xTaskNotifyFromISR(hndl, ev, eSetBits, &shouldYield);
-
-    /** @todo Verificar se é válido chamar portYIELD_FROM_ISR várias vezes */
-    if (xPortInIsrContext()) {
-        if (g_IsInISRTimer && shouldYield)
-            return esp_timer_isr_dispatch_need_yield();
-
-        portYIELD_FROM_ISR(shouldYield);
-    }
+    internal_mark_for_execution(m_Impl, ev);
 };
 
 bool schedule(EventTask &task) noexcept
@@ -72,11 +80,13 @@ bool schedule(EventTask &task) noexcept
                    task->on_start();
 
                    port::event_bits ev;
-                   for (;;) {
+                   while (task->m_Impl != nullptr) {
                        // Interromper execução até receber uma notificação.
                        xTaskNotifyWait(0, 0xFFFFFFFF, &ev, portMAX_DELAY);
                        task->run_once(ev);
                    }
+
+                   vTaskDelete(NULL);
                },
                "port-task",           // Nome da task
                PORT_TASK_STACK_SIZE,  // Tamanho da pilha
@@ -91,7 +101,19 @@ void unschedule(EventTask &task) noexcept
     if (task.m_Impl == nullptr)
         return;
 
-    vTaskDelete(reinterpret_cast<TaskHandle_t>(task.m_Impl));
+    TaskHandle_t hndl = task.m_Impl;
+    task.m_Impl = nullptr;
+
+    // A própria task lida com o fim de sua execução. Marcamos que ela deve
+    // finalizar ao definir `m_Impl` como nullptr, efetivamente "vazando" a
+    // memória da task até que ela mesma se libere. Isso evita que a task seja
+    // interrompida espontâneamente enquanto esteja executando.
+    internal_mark_for_execution(hndl, 0);
+};
+
+void enter_deep_sleep(port::time_us duration) noexcept
+{
+    esp_deep_sleep(duration);
 };
 
 //< Cria um timer de alta resolução do ESP-IDF

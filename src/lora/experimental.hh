@@ -25,8 +25,17 @@ enum class StaggeredFSM
     /// @brief O nó está realizando um broadcast.
     SENDING_BROADCAST,
 
-    /// @todo Implementar os próximos estados reais da rede.
-    EXECUTING,
+    /// @brief O nó está dormindo (deep sleep) aguardando o slot de recepção.
+    WAITING_TO_RX,
+
+    /// @brief O nó está ouvindo os pacotes de seus filhos.
+    RECEIVING_FROM_CHILDREN,
+
+    /// @brief O nó está aguardando o slot de transmissão ativamente.
+    WAITING_TO_TX,
+
+    /// @brief O nó está enviando uma mensagem.
+    SENDING_TO_PARENT,
 };
 
 struct RuntimeState
