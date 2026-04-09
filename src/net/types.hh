@@ -3,6 +3,7 @@
 #include <etl/vector.h>
 #include <stdint.h>
 
+#include "lora/radio.hh"
 #include "net/clock.hh"
 #include "net/trickle.hh"
 
@@ -74,21 +75,67 @@ struct Rank
     }
 };
 
-constexpr size_t  MAX_CANDIDATE_PARENTS = 16;
-constexpr node_id GATEWAY_ID = 0;
-constexpr uint8_t UNKNOWN_MAX_HOPS = 0;
-constexpr Rank    infinite_rank = Rank::from(0xFF);
+constexpr uint32_t PARAM_BANDWIDTH = 125000;
+constexpr uint32_t PARAM_CHANNEL_GAP = PARAM_BANDWIDTH / 8;
+constexpr uint32_t PARAM_FREQUENCY_MIN = 915000000;
+constexpr uint32_t PARAM_FREQUENCY_MAX = 928000000;
+constexpr size_t   MAX_CANDIDATE_PARENTS = 16;
+constexpr node_id  GATEWAY_ID = 0;
+constexpr uint8_t  UNKNOWN_MAX_HOPS = 0;
+constexpr Rank     infinite_rank = Rank::from(0xFF);
+
+constexpr lora::Parameters BASE_PARAMETERS = {
+    .freq_hz = MIN_FREQUENCY,
+    .bandwidth_hz = PARAM_BANDWIDTH,
+    .preamble_length = 12,
+    .power_db = 5,
+    .spreading_factor = 12,
+    .coding_rate = 5,
+    .sync_word = 0x77,
+    .implicit_header = false,
+};
+
+struct NodeInfo
+{
+    /**
+     * @brief Um identificador único deste nó sensor.
+     */
+    net::node_id id;
+
+    /**
+     * @brief O rank do nó RPL.
+     */
+    net::Rank rank;
+
+    /**
+     * @brief Calcula os parâmetros LoRa usados para se comunicar com um nó
+     * deste rank.
+     */
+    inline lora::Parameters calculate_personal_parameters() const noexcept
+    {
+        lora::Parameters parameters = BASE_PARAMETERS;
+
+        // Adicionar offset específico de bandwidth baseado no ID
+        uint32_t freq_offset_hz = id * (PARAM_BANDWIDTH + PARAM_CHANNEL_GAP);
+        freq_offset_hz %= PARAM_FREQUENCY_MAX - PARAM_FREQUENCY_MIN;
+
+        parameters.freq_hz += freq_offset_hz;
+
+        assert(parameters.freq_hz >= PARAM_FREQUENCY_MIN);
+        assert(parameters.freq_hz <= PARAM_FREQUENCY_MAX);
+
+        return parameters;
+    }
+};
 
 /**
  * @brief Representa as informações de um vizinho potencialmente pai
  * do nó. Atualizado apenas durante a fase de inicialização.
  */
-struct ParentInfo
+struct ParentInfo : public NodeInfo
 {
-    float        last_rssi;
-    float        last_snr;
-    net::node_id id;
-    net::Rank    rank;
+    float last_rssi;
+    float last_snr;
 
     inline uint32_t score() const
     {
@@ -150,7 +197,7 @@ struct SlotTimingInfo
 };
 
 template <typename RtState>
-struct State
+struct State : public NodeInfo
 {
     RtState rt_state;
 
@@ -170,16 +217,6 @@ struct State
     net::SlotTimingInfo slot_info;
 
     /**
-     * @brief Um identificador único deste nó sensor.
-     */
-    net::node_id id;
-
-    /**
-     * @brief O rank do nó RPL.
-     */
-    net::Rank rank;
-
-    /**
      * @brief O número de hops necessários para transmitir um dado do nó mais
      * distante até a raíz da rede. Será 0 caso não seja conhecido.
      */
@@ -195,5 +232,53 @@ struct State
      * @brief Mantém e gerencia uma lista de possíveis pais.
      */
     net::CandidateParents candidate_parents;
+
+    /**
+     * @brief Calcula a duração de um slot completo da rede. Um slot equivale à
+     * um período único de transmissão de dados dos nós filhos aos seus
+     * respectivos pais.
+     */
+    constexpr port::time_us calculate_slot_duration() const noexcept
+    {
+        // Calcular a duração de um subslot
+        port::time_us duration = BASE_PARAMETERS.calculate_time_on_air(
+            slot_info.tdm_subslot_mtu_bytes
+        );
+
+        // Somar gap entre subslots
+        duration += slot_info.tdm_subslot_guard_symbols *
+                    BASE_PARAMETERS.calculate_symbol_time();
+
+        // Calcular, então, a duração de um slot completo
+        return duration * slot_info.tdm_subslot_count;
+    }
+
+    /**
+     * @brief Calcula o tempo da rede, em microssegundos, em que este nó deve
+     * entrar na sua próxima janela de recepção. Retorna `INT64_MAX` caso não
+     * seja possível determinar este tempo no estado atual da rede.
+     */
+    constexpr port::time_us calculate_next_rx_time() const noexcept
+    {
+        if (max_hops == UNKNOWN_MAX_HOPS)
+            return INT64_MAX;
+
+        auto slotDuration = calculate_slot_duration();
+
+        // A duração de uma contagem monotônica de slots até a mesma contagem
+        // reiniciar
+        auto frameDuration = slotDuration * slot_info.tdm_slot_count;
+
+        // Calcular o índice do nosso slot
+        uint8_t mySlot = max_hops - rank.hops;
+
+        // Calcular o tempo até o próximo slot de RX nosso
+        port::time_us timeUntilNextSlot = mySlot * slotDuration;
+        port::time_us now = m_State.net_time.get_time_us();
+        timeUntilNextSlot = (now - timeUntilNextSlot) % frameDuration;
+        timeUntilNextSlot = frameDuration - timeUntilNextSlot;
+
+        return now + timeUntilNextSlot;
+    }
 };
 }  // namespace net

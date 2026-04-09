@@ -35,7 +35,7 @@ enum class StaggeredFSM
     WAITING_TO_TX,
 
     /// @brief O nó está enviando uma mensagem.
-    SENDING_TO_PARENT,
+    TRANSMITTING_TO_PARENT,
 };
 
 struct RuntimeState

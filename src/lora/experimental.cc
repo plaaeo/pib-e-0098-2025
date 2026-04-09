@@ -131,42 +131,7 @@ bool StaggeredProtocol::process_broadcast(const net::Broadcast &packet)
     return reportInconsistency;
 };
 
-void StaggeredProtocol::sleep_until_next_slot()
-{
-    auto &si = m_State.slot_info;
-
-    // Tentar configurar o modo de menor consumo energético
-    if (m_Phys.sleep() != lora::StatusCode::ok)
-        m_Phys.standby();
-
-    // Calcular a duração de um slot completo
-    port::time_us slotDuration =
-        m_Params.calculate_time_on_air(si.tdm_subslot_mtu_bytes);
-
-    slotDuration +=
-        si.tdm_subslot_guard_symbols * m_Params.calculate_symbol_time();
-
-    slotDuration *= si.tdm_subslot_count;
-
-    // A duração de uma contagem monotônica de slots até a contagem
-    // reiniciar
-    port::time_us frameDuration = slotDuration * si.tdm_slot_count;
-
-    // Calcular o índice do nosso slot
-    uint8_t mySlot = m_State.max_hops - m_State.rank.hops;
-
-    // Calcular o tempo até o próximo slot nosso
-    port::time_us timeUntilNextSlot = mySlot * slotDuration;
-    port::time_us now = m_State.net_time.get_time_us();
-    timeUntilNextSlot = (timeUntilNextSlot - now) % frameDuration;
-    timeUntilNextSlot = frameDuration - timeUntilNextSlot;
-
-    m_State.rt_state.expected_slot_wakeup_time = now + timeUntilNextSlot;
-
-    port::enter_deep_sleep(
-        timeUntilNextSlot + m_State.rt_state.slot_timer_calibration
-    );
-}
+void StaggeredProtocol::sleep_until_next_slot() {}
 
 void StaggeredProtocol::handle_broadcast_recv(lora::IrqFlags flags)
 {
@@ -287,7 +252,50 @@ void StaggeredProtocol::on_state_enter()
     };
 
     case StaggeredFSM::WAITING_TO_RX: {
-        sleep_until_next_slot();
+        // Tentar configurar o modo de menor consumo energético
+        if (m_Phys.sleep() != lora::StatusCode::ok)
+            LORA_ASSERT(m_Phys.standby());
+
+        // Calcular tempo que o MCU deve acordar para receber
+        port::time_us wakeupTime = m_State.calculate_next_rx_time();
+        port::time_us now = m_State.net_time.get_time_us();
+
+        m_State.rt_state.expected_slot_wakeup_time = wakeupTime;
+
+        // Entrar em modo de sono. O código para de executar após esta chamada
+        // de função.
+        port::enter_deep_sleep(
+            (wakeupTime - now) + m_State.rt_state.slot_timer_calibration
+        );
+
+        return;
+    }
+
+    case StaggeredFSM::RECEIVING_FROM_CHILDREN: {
+        // Definir timeout para finalizar recepções
+        m_TimeoutTimer.start_once(m_State.calculate_slot_duration());
+
+        // Configurar parâmetros de comunicação direta
+        LORA_ASSERT(
+            m_Phys.set_parameters(m_State.calculate_personal_parameters())
+        );
+
+        // Iniciar recepção sem timeout
+        LORA_ASSERT(m_Phys.recv({
+            .irq_flags_mask = lora::ALL_RX_FLAGS,
+            .irq_dispatch_mask = lora::IRQ_RX_DONE,
+            .length = 0,
+            .continuous = true,
+        }));
+
+        PORT_LOGI(TAG, "receiving readings from children");
+        return;
+    }
+
+    case StaggeredFSM::WAITING_TO_TX: {
+    }
+
+    case StaggeredFSM::TRANSMITTING_TO_PARENT: {
     }
     }
 };
@@ -390,6 +398,21 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
 
         return StaggeredFSM::RECEIVING_BROADCASTS;
     };
+
+    case StaggeredFSM::RECEIVING_FROM_CHILDREN: {
+        // Caso tenhamos recebido uma mensagem
+        if (events & EVENT_IRQ) {
+            events &= ~EVENT_IRQ;
+        }
+
+        // Caso o tempo de recepção tenha acabado
+        if (events & EVENT_TIMER) {
+            events &= ~EVENT_TIMER;
+            return StaggeredFSM::WAITING_TO_TX;
+        }
+
+        return m_State.rt_state.fsm;
+    }
     }
 };
 
