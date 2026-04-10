@@ -103,9 +103,15 @@ private:
     bool process_broadcast(const net::Broadcast &packet);
 
     /**
-     * @brief Chamado ao receber `EVENT_IRQ` durante a inicialização.
+     * @brief Chamado ao receber `EVENT_IRQ` durante a recepção de um broadcast.
      */
     void handle_broadcast_recv(lora::IrqFlags flags);
+
+    /**
+     * @brief Chamado ao receber `EVENT_IRQ` durante a recepção de uma mensagem
+     * de um nó filho.
+     */
+    void handle_child_recv();
 
     /**
      * @brief Dorme até inicializar os slots de recepção deste nó.

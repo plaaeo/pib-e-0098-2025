@@ -300,6 +300,31 @@ void StaggeredProtocol::on_state_enter()
     }
 };
 
+void StaggeredProtocol::handle_child_recv() {
+    // Verificar flags causadoras do IRQ
+    auto [status, flags] = m_Phys.get_flags();
+    LORA_ASSERT(status);
+
+    // Caso seja `false`, o radio foi utilizado por outro código além deste.
+    if (~flags & lora::IRQ_RX_DONE) {
+        PORT_LOGW(TAG, "received IRQ without RX_DONE, expected child message (flags = %u)", flags);
+        return;
+    }
+    
+    m_Phys.clear_flags(lora::ALL_RX_FLAGS);
+    
+    // Verificar se a recepção teve sucesso
+    if (flags & lora::RX_ERROR_FLAGS) {
+        PORT_LOGW(TAG, "received child message with errors");
+        return;
+    }
+
+    auto [status, length] = m_Phys.get_message_length();
+    LORA_ASSERT(status);
+
+    /// @todo
+}
+
 StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
 {
     switch (m_State.rt_state.fsm) {
@@ -403,11 +428,16 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
         // Caso tenhamos recebido uma mensagem
         if (events & EVENT_IRQ) {
             events &= ~EVENT_IRQ;
+            handle_child_recv();
         }
 
         // Caso o tempo de recepção tenha acabado
         if (events & EVENT_TIMER) {
             events &= ~EVENT_TIMER;
+            
+            // Finalizar qualquer recepção que exceda a janela de RX
+            LORA_ASSERT(m_Phys.standby());
+
             return StaggeredFSM::WAITING_TO_TX;
         }
 
@@ -418,7 +448,7 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
 
 void StaggeredProtocol::on_start()
 {
-    auto isr = [](void *arg) {
+    PORT_ISR_SAFE static void time_and_notify_isr(void *arg) {
         auto self = static_cast<StaggeredProtocol *>(arg);
 
         self->m_MonoTimeAtISR_us = port::get_monotonic_time();
@@ -427,7 +457,7 @@ void StaggeredProtocol::on_start()
 
     // Configurar ISR
     m_Phys.set_isr({
-        .function = isr,
+        .function = time_and_notify_isr,
         .argument = this,
     });
 

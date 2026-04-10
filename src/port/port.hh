@@ -184,14 +184,14 @@ template <event_bits Events>
  */
 constexpr port::ISR make_event_isr(port::EventTask &task) noexcept
 {
-    PORT_ISR_SAFE void nested_isr(void *task)
+    PORT_ISR_SAFE static void ___nested_isr(void *task)
     {
         static_cast<port::EventTask *>(task)->dispatch_events(Events);
     }
 
     return port::ISR{
         .argument = &task,
-        .function = nested_isr,
+        .function = ___nested_isr,
     };
 }
 
