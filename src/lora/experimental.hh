@@ -2,6 +2,8 @@
 
 #include <RadioLib.h>
 
+#include <etl/vector.h>
+
 #include "net/clock.hh"
 #include "net/packets.hh"
 #include "net/trickle.hh"
@@ -13,7 +15,10 @@
 
 #include "port/port.hh"
 
+
 namespace lora {
+constexpr size_t MAX_READINGS_IN_PACKET = 64;
+
 enum class StaggeredFSM
 {
     /// @brief Valor padrão após a construção inicial da máquina.
@@ -132,5 +137,7 @@ private:
     port::Timer m_TimeoutTimer;
 
     net::TrickleTimer m_Trickle;
+
+    etl::vector<net::OwnedReading, MAX_READINGS_IN_PACKET> m_LastReceivedReadings;
 };
 }  // namespace lora

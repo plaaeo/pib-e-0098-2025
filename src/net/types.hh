@@ -234,11 +234,10 @@ struct State : public NodeInfo
     net::CandidateParents candidate_parents;
 
     /**
-     * @brief Calcula a duração de um slot completo da rede. Um slot equivale à
-     * um período único de transmissão de dados dos nós filhos aos seus
-     * respectivos pais.
+     * @brief Calcula a duração de um subslot completo da rede. Um subslot equivale à um
+     * tempo de transmissão máximo, de um filho para seu pai, alocado para um único filho.
      */
-    constexpr port::time_us calculate_slot_duration() const noexcept
+    constexpr port::time_us calculate_subslot_duration() const noexcept
     {
         // Calcular a duração de um subslot
         port::time_us duration = BASE_PARAMETERS.calculate_time_on_air(
@@ -249,8 +248,25 @@ struct State : public NodeInfo
         duration += slot_info.tdm_subslot_guard_symbols *
                     BASE_PARAMETERS.calculate_symbol_time();
 
-        // Calcular, então, a duração de um slot completo
-        return duration * slot_info.tdm_subslot_count;
+        return duration;
+    }
+
+    /**
+     * @brief Calcula a duração de um slot completo da rede. Um slot equivale à
+     * um período único de transmissão de dados dos nós filhos aos seus
+     * respectivos pais.
+     */
+    constexpr port::time_us calculate_slot_duration() const noexcept
+    {
+        return calculate_subslot_duration() * slot_info.tdm_subslot_count;
+    }
+
+    /**
+     * @brief Calcula o tempo de espera para o início de transmissão deste nó.
+     */
+    constexpr port::time_us calculate_tx_wait_time() const noexcept
+    {
+        return calculate_subslot_duration() * (id % slot_info.tdm_subslot_count);
     }
 
     /**

@@ -31,7 +31,8 @@ StaggeredProtocol::StaggeredProtocol(
       })
     , m_MonoTimeAtISR_us(0)
     , m_TimeoutTimer(port::make_event_isr<EVENT_TIMER>(*this))
-    , m_Trickle(port::make_event_isr<EVENT_TRICKLE>(*this), state.trickle) {};
+    , m_Trickle(port::make_event_isr<EVENT_TRICKLE>(*this), state.trickle)
+    , m_LastReceivedReadings() {};
 
 void StaggeredProtocol::schedule(const sensor::Reading &reading) {
 
@@ -272,6 +273,8 @@ void StaggeredProtocol::on_state_enter()
     }
 
     case StaggeredFSM::RECEIVING_FROM_CHILDREN: {
+        m_LastReceivedReadings.clear();
+        
         // Definir timeout para finalizar recepções
         m_TimeoutTimer.start_once(m_State.calculate_slot_duration());
 
@@ -293,9 +296,35 @@ void StaggeredProtocol::on_state_enter()
     }
 
     case StaggeredFSM::WAITING_TO_TX: {
+        /// @todo lógica de CSMA em subslots (desnecessário para o experimento)
+        
+        // Definir timeout para inciar a transmissão
+        m_TimeoutTimer.start_once(m_State.calculate_tx_wait_time());
+        
+        PORT_LOGI(TAG, "waiting for my transmission slot");
+        return;
     }
 
     case StaggeredFSM::TRANSMITTING_TO_PARENT: {
+        /// @todo Inserir a leitura deste nó em m_LastReceivedReadings
+        uint8_t buffer[UINT8_MAX];
+        
+        // Codifica todas as leituras atuais
+        auto length = net::encode_readings(
+            m_LastReceivedReadings,
+            buffer,
+            UINT8_MAX
+        );
+        
+        assert(length > 0);
+
+        // Transmite a mensagem codificada
+        LORA_ASSERT(m_Phys.send({
+            .data = buffer,
+            .length = length
+        }));
+
+        return;
     }
     }
 };
@@ -322,7 +351,16 @@ void StaggeredProtocol::handle_child_recv() {
     auto [status, length] = m_Phys.get_message_length();
     LORA_ASSERT(status);
 
-    /// @todo
+    // Ler buffer da mensagem recebida
+    uint8_t buffer[length];
+    LORA_ASSERT(m_Phys.read_message(buffer, length));
+
+    // Decodificar leituras recebidas
+    net::decode_readings(
+        m_LastReceivedReadings,
+        buffer,
+        length
+    );
 }
 
 StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
@@ -442,7 +480,29 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
         }
 
         return m_State.rt_state.fsm;
-    }
+    };
+
+    case StaggeredFSM::WAITING_TO_TX: {
+        // Caso o tempo de espera tenha acabado
+        if (events & EVENT_TIMER) {
+            events &= ~EVENT_TIMER;
+            return StaggeredFSM::TRANSMITTING_TO_PARENT;
+        }
+
+        /// @note Deve ser inalcançável.
+        return m_State.rt_state.fsm;
+    };
+
+    case StaggeredFSM::TRANSMITTING_TO_PARENT: {
+        // Caso tenhamos finalizado a transmissão
+        if (events & EVENT_IRQ) {
+            events &= ~EVENT_IRQ;
+            return StaggeredFSM::WAITING_TO_RX;
+        }
+
+        /// @note Deve ser inalcançável.
+        return m_State.rt_state.fsm;
+    };
     }
 };
 
