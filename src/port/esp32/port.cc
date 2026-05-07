@@ -118,8 +118,8 @@ void enter_deep_sleep(port::time_us duration) noexcept
 
 //< Cria um timer de alta resolução do ESP-IDF
 Timer::Timer(port::ISR isr)
-    : m_ISR(isr)
-    , m_Impl(nullptr)
+    : m_Impl(nullptr)
+    , m_ISR(isr)
 {
     esp_timer_create_args_t timer_cfg{
         .callback = isr.function,

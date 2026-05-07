@@ -1,4 +1,5 @@
 #pragma once
+#include <etl/tuple.h>
 #include <etl/utility.h>
 #include <stdlib.h>
 
@@ -292,7 +293,7 @@ public:
      * @return `StatusCode::communication_timed_out`
      * @return `StatusCode::other`
      */
-    virtual etl::pair<StatusCode, float> get_rssi() = 0;
+    virtual etl::tuple<StatusCode, float> get_rssi() = 0;
 
     /**
      * @brief Obtém a relação sinal-ruído da última mensagem, em dB.
@@ -304,7 +305,7 @@ public:
      * @return `StatusCode::communication_timed_out`
      * @return `StatusCode::other`
      */
-    virtual etl::pair<StatusCode, float> get_snr() = 0;
+    virtual etl::tuple<StatusCode, float> get_snr() = 0;
 
     /**
      * @brief Define um ISR para lidar com eventos despachados pelo
@@ -328,7 +329,7 @@ public:
      * @return `StatusCode::communication_timed_out`
      * @return `StatusCode::other`
      */
-    virtual etl::pair<StatusCode, IrqFlags> get_flags() = 0;
+    virtual etl::tuple<StatusCode, IrqFlags> get_flags() = 0;
 
     /**
      * @brief Limpa as flags de interrupção dadas no radiotransmissor. Flags que
@@ -351,7 +352,7 @@ public:
      * @return `StatusCode::communication_timed_out`
      * @return `StatusCode::other`
      */
-    virtual etl::pair<StatusCode, packet_length> get_message_length() = 0;
+    virtual etl::tuple<StatusCode, packet_length> get_message_length() = 0;
 
     /**
      * @brief Obtém o payload da ultima mensagem recebida pelo radiotransmissor.

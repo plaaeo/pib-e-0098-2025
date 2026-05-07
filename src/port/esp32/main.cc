@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include "lora/experimental.hh"
+#include "lora/radios/radiolib.hh"
 
 #include "sensor/interface.hh"
 #include "sensor/ph.hh"
@@ -80,12 +81,16 @@ RTC_DATA_ATTR static struct
 //< Interface analógica para o ADS1115.
 sensor::ADS1X15Interface g_ADC;
 
-//< Interface para envio de leituras de sensor.
-lora::IProtocol *g_Proto = nullptr;
-
 RTC_DATA_ATTR lora::PersistentState g_State = {
+    net::NodeInfo{
+        .id = UINT8_MAX,
+        .rank = net::infinite_rank,
+    },
     .rt_state =
         {
+            .fsm = lora::StaggeredFSM::INITIALIZED,
+            .expected_slot_wakeup_time = 0,
+
             //< Aproximadamente o tempo de inicialização do ESP32-S3 durante
             // deep sleep, descoberto experimentalmente.
             .slot_timer_calibration = -1000000,
@@ -93,21 +98,23 @@ RTC_DATA_ATTR lora::PersistentState g_State = {
     .trickle = {},
     .net_time = {},
     .slot_info = {},
-    .id = UINT8_MAX,
-    .rank = net::infinite_rank,
     .max_hops = net::UNKNOWN_MAX_HOPS,
     .has_children = false,
     .candidate_parents = {},
 };
+
+Module            g_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
+LORA_RADIO        g_LoraPhy = LORA_RADIO(&g_Module);
+lora::RadioLibPhy g_Phy(g_LoraPhy);
+
+//< Interface para envio de leituras de sensor.
+lora::StaggeredProtocol g_Proto(g_Phy, g_State);
 
 /**
  * @brief Task do nó sensor.
  */
 void task_sensor()
 {
-    static Module     s_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
-    static LORA_RADIO s_Phys = LORA_RADIO(&s_Module);
-
     // Tentar inicializar I2C do ADS1115
     if (!Wire.begin(ADS1115_SDA, ADS1115_SCL)) {
         PORT_LOGW(
@@ -124,12 +131,14 @@ void task_sensor()
     }
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-    s_Phys.begin(915.0f);
-    s_Phys.forceLDRO(false);
+    g_LoraPhy.begin(915.0f);
+    g_LoraPhy.forceLDRO(false);
 
-    g_State.id = s_Phys.randomByte();
+    g_State.id = g_LoraPhy.randomByte();
 
-    g_Proto = lora::StaggeredProtocol::create(&s_Phys, g_State);
+    if (!port::schedule(g_Proto)) {
+        PORT_LOGW(TAG, "falha ao incializar protocolo");
+    }
 }
 
 //< Função `main` do protótipo

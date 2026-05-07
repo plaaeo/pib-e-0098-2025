@@ -114,9 +114,9 @@ public:
 
 protected:
     inline EventTask(task_priority priority)
-        : m_Priority(priority)
-        , m_Pending(0)
-        , m_Impl(nullptr) {};
+        : m_Impl(nullptr)
+        , m_Priority(priority)
+        , m_Pending(0){};
 
     /**
      * @brief Executado ao criar a task.
@@ -182,16 +182,19 @@ template <event_bits Events>
  * @param task Um ponteiro para a task que receberá os eventos.
  * @tparam Events Os eventos que serão despachados.
  */
-constexpr port::ISR make_event_isr(port::EventTask &task) noexcept
+inline port::ISR make_event_isr(port::EventTask &task) noexcept
 {
-    PORT_ISR_SAFE static void ___nested_isr(void *task)
+    struct Nested
     {
-        static_cast<port::EventTask *>(task)->dispatch_events(Events);
-    }
+        PORT_ISR_SAFE static void isr(void *task)
+        {
+            static_cast<port::EventTask *>(task)->dispatch_events(Events);
+        };
+    };
 
     return port::ISR{
+        .function = Nested::isr,
         .argument = &task,
-        .function = ___nested_isr,
     };
 }
 

@@ -77,7 +77,7 @@ struct Broadcast
         if (length == BROADCAST_MAX_SIZE)
             out.max_hops = buffer[10];
 
-        return etl::optional<Broadcast>{ out };
+        return etl::optional<Broadcast>{out};
     };
 
     /**
@@ -118,10 +118,11 @@ struct Broadcast
  * @brief Representa um `repr::CompressedReading` coletado por um
  * dispositivo específico.
  */
-struct OwnedReading {
-    net::node_id id;
+struct OwnedReading
+{
+    net::node_id            id;
     repr::CompressedReading reading;
-}
+};
 
 /**
  * @brief Codifica um vetor de leituras comprimidas em um buffer para
@@ -133,24 +134,25 @@ struct OwnedReading {
  */
 size_t encode_readings(
     const etl::ivector<OwnedReading> &readings,
-    uint8_t *output,
-    size_t out_capacity,
-) {
+    uint8_t                          *output,
+    size_t                            out_capacity
+)
+{
     constexpr size_t EXPECTED_CR_SIZE = 7;
     constexpr size_t EXPECTED_SMALL_CR_SIZE = 4;
-    
+
     // Sinaliza para atualizar o código quando esses valores mudarem
-    static_assert(CompressedReading::BIT_SIZE == EXPECTED_CR_SIZE);
-    static_assert(META_TEMPERATURE.bits == 8);
-    static_assert(META_TDS.bits == 8);
-    static_assert(META_PH.bits == 8);
+    static_assert(repr::CompressedReading::BIT_SIZE == EXPECTED_CR_SIZE * 8);
+    static_assert(repr::META_TEMPERATURE.bits == 8);
+    static_assert(repr::META_TDS.bits == 8);
+    static_assert(repr::META_PH.bits == 8);
 
     if (out_capacity <= EXPECTED_CR_SIZE)
         return 0;
 
     // Codificar primeiro a base
     size_t i = 0;
-    auto &base = readings.front();
+    auto  &base = readings.front();
 
     // Codificar forma padrão da OwnedReading
     output[i++] = static_cast<uint8_t>(base.reading.time & 0xFF);
@@ -171,7 +173,10 @@ size_t encode_readings(
 
         // Verificar se terá overflow do tempo
         if (timediff > UINT8_MAX)
-            PORT_LOGW(TAG, "small time representation overflow for %hhu's reading", base.id);
+            PORT_LOGW(
+                TAG, "small time representation overflow for %hhu's reading",
+                base.id
+            );
 
         // Codificar forma padrão da OwnedReading
         output[i++] = static_cast<uint8_t>(timediff);
@@ -180,10 +185,9 @@ size_t encode_readings(
         output[i++] = static_cast<uint8_t>(base.reading.tds);
         output[i++] = static_cast<uint8_t>(base.reading.ph);
     }
-    
+
     return i;
 }
-
 
 /**
  * @brief Decodifica um vetor de leituras comprimidas de um buffer
@@ -195,17 +199,18 @@ size_t encode_readings(
  */
 size_t decode_readings(
     etl::ivector<OwnedReading> &readings,
-    const uint8_t *input,
-    size_t in_length,
-) {
+    const uint8_t              *input,
+    size_t                      in_length
+)
+{
     constexpr size_t EXPECTED_CR_SIZE = 7;
     constexpr size_t EXPECTED_SMALL_CR_SIZE = 4;
-    
+
     // Sinaliza para atualizar o código quando esses valores mudarem
-    static_assert(CompressedReading::BIT_SIZE == EXPECTED_CR_SIZE);
-    static_assert(META_TEMPERATURE.bits == 8);
-    static_assert(META_TDS.bits == 8);
-    static_assert(META_PH.bits == 8);
+    static_assert(repr::CompressedReading::BIT_SIZE == EXPECTED_CR_SIZE * 8);
+    static_assert(repr::META_TEMPERATURE.bits == 8);
+    static_assert(repr::META_TDS.bits == 8);
+    static_assert(repr::META_PH.bits == 8);
 
     if (in_length <= EXPECTED_CR_SIZE || readings.full())
         return 0;
@@ -213,7 +218,7 @@ size_t decode_readings(
     size_t i = 0;
 
     // Decodificar forma padrão da OwnedReading
-    OwnedReading base = { };
+    OwnedReading base = {};
     base.reading.time |= static_cast<uint32_t>(input[i++]);
     base.reading.time |= static_cast<uint32_t>(input[i++]) << 8;
     base.reading.time |= static_cast<uint32_t>(input[i++]) << 16;
@@ -228,12 +233,12 @@ size_t decode_readings(
 
     in_length -= EXPECTED_CR_SIZE;
 
-    size_t smallCRs = in_length / EXPECTED_SMALL_CR_SIZE;
-    for (size_t it = 0; it < smallCRs && !readings.full(); i++) {
-        OwnedReading item = { };
+    size_t it, smallCRs = in_length / EXPECTED_SMALL_CR_SIZE;
+    for (it = 0; it < smallCRs && !readings.full(); i++) {
+        OwnedReading item = {};
 
         // Decodificar forma minimizada da OwnedReading
-        item.reading.time = base.reading.time; 
+        item.reading.time = base.reading.time;
         item.reading.time += input[i++];
         item.id = input[i++];
         item.reading.temperature = input[i++];
@@ -243,7 +248,7 @@ size_t decode_readings(
         // Caso haja overflow no vetor
         readings.push_back(item);
     }
-    
+
     return it + 1;
 }
 

@@ -85,7 +85,7 @@ constexpr uint8_t  UNKNOWN_MAX_HOPS = 0;
 constexpr Rank     infinite_rank = Rank::from(0xFF);
 
 constexpr lora::Parameters BASE_PARAMETERS = {
-    .freq_hz = MIN_FREQUENCY,
+    .freq_hz = PARAM_FREQUENCY_MIN,
     .bandwidth_hz = PARAM_BANDWIDTH,
     .preamble_length = 12,
     .power_db = 5,
@@ -234,8 +234,9 @@ struct State : public NodeInfo
     net::CandidateParents candidate_parents;
 
     /**
-     * @brief Calcula a duração de um subslot completo da rede. Um subslot equivale à um
-     * tempo de transmissão máximo, de um filho para seu pai, alocado para um único filho.
+     * @brief Calcula a duração de um subslot completo da rede. Um subslot
+     * equivale à um tempo de transmissão máximo, de um filho para seu pai,
+     * alocado para um único filho.
      */
     constexpr port::time_us calculate_subslot_duration() const noexcept
     {
@@ -266,7 +267,8 @@ struct State : public NodeInfo
      */
     constexpr port::time_us calculate_tx_wait_time() const noexcept
     {
-        return calculate_subslot_duration() * (id % slot_info.tdm_subslot_count);
+        return calculate_subslot_duration() *
+               (id % slot_info.tdm_subslot_count);
     }
 
     /**
@@ -290,7 +292,7 @@ struct State : public NodeInfo
 
         // Calcular o tempo até o próximo slot de RX nosso
         port::time_us timeUntilNextSlot = mySlot * slotDuration;
-        port::time_us now = m_State.net_time.get_time_us();
+        port::time_us now = net_time.get_time_us();
         timeUntilNextSlot = (now - timeUntilNextSlot) % frameDuration;
         timeUntilNextSlot = frameDuration - timeUntilNextSlot;
 

@@ -28,11 +28,12 @@ StaggeredProtocol::StaggeredProtocol(
           .spreading_factor = 12,
           .coding_rate = 5,
           .sync_word = 0x77,
+          .implicit_header = false,
       })
     , m_MonoTimeAtISR_us(0)
     , m_TimeoutTimer(port::make_event_isr<EVENT_TIMER>(*this))
     , m_Trickle(port::make_event_isr<EVENT_TRICKLE>(*this), state.trickle)
-    , m_LastReceivedReadings() {};
+    , m_LastReceivedReadings(){};
 
 void StaggeredProtocol::schedule(const sensor::Reading &reading) {
 
@@ -40,13 +41,16 @@ void StaggeredProtocol::schedule(const sensor::Reading &reading) {
 
 bool StaggeredProtocol::process_broadcast(const net::Broadcast &packet)
 {
+    lora::StatusCode status;
+    float            rssi, snr;
+
     bool reportInconsistency = false;
 
     // Obter métricas de qualidade do pacote
-    auto [status, rssi] = m_Phys.get_rssi();
+    etl::tie(status, rssi) = m_Phys.get_rssi();
     LORA_ASSERT(status);
 
-    auto [status, snr] = m_Phys.get_snr();
+    etl::tie(status, snr) = m_Phys.get_snr();
     LORA_ASSERT(status);
 
     PORT_LOGI(
@@ -121,11 +125,13 @@ bool StaggeredProtocol::process_broadcast(const net::Broadcast &packet)
 
     // Salvar caso o nó escutado seja um potencial pai
     if (m_State.rank.hops == packet.rank.hops + 1) {
-        m_State.candidate_parents.add_or_update({
+        m_State.candidate_parents.add_or_update(net::ParentInfo{
+            net::NodeInfo{
+                .id = packet.id,
+                .rank = packet.rank,
+            },
             .last_rssi = rssi,
             .last_snr = snr,
-            .id = packet.id,
-            .rank = packet.rank,
         });
     }
 
@@ -242,7 +248,7 @@ void StaggeredProtocol::on_state_enter()
         // Realizar a retransmissão
         LORA_ASSERT(m_Phys.send({
             .data = buffer,
-            .length = length,
+            .length = static_cast<lora::packet_length>(length),
         }));
 
         PORT_LOGI(
@@ -274,14 +280,13 @@ void StaggeredProtocol::on_state_enter()
 
     case StaggeredFSM::RECEIVING_FROM_CHILDREN: {
         m_LastReceivedReadings.clear();
-        
+
         // Definir timeout para finalizar recepções
         m_TimeoutTimer.start_once(m_State.calculate_slot_duration());
 
         // Configurar parâmetros de comunicação direta
-        LORA_ASSERT(
-            m_Phys.set_parameters(m_State.calculate_personal_parameters())
-        );
+        LORA_ASSERT(m_Phys.set_parameters(m_State.calculate_personal_parameters(
+        )));
 
         // Iniciar recepção sem timeout
         LORA_ASSERT(m_Phys.recv({
@@ -297,10 +302,10 @@ void StaggeredProtocol::on_state_enter()
 
     case StaggeredFSM::WAITING_TO_TX: {
         /// @todo lógica de CSMA em subslots (desnecessário para o experimento)
-        
+
         // Definir timeout para inciar a transmissão
         m_TimeoutTimer.start_once(m_State.calculate_tx_wait_time());
-        
+
         PORT_LOGI(TAG, "waiting for my transmission slot");
         return;
     }
@@ -308,47 +313,52 @@ void StaggeredProtocol::on_state_enter()
     case StaggeredFSM::TRANSMITTING_TO_PARENT: {
         /// @todo Inserir a leitura deste nó em m_LastReceivedReadings
         uint8_t buffer[UINT8_MAX];
-        
+
         // Codifica todas as leituras atuais
-        auto length = net::encode_readings(
-            m_LastReceivedReadings,
-            buffer,
-            UINT8_MAX
-        );
-        
+        auto length =
+            net::encode_readings(m_LastReceivedReadings, buffer, UINT8_MAX);
+
         assert(length > 0);
 
         // Transmite a mensagem codificada
-        LORA_ASSERT(m_Phys.send({
-            .data = buffer,
-            .length = length
-        }));
+        LORA_ASSERT(m_Phys.send(
+            {.data = buffer, .length = static_cast<lora::packet_length>(length)}
+        ));
 
         return;
     }
     }
 };
 
-void StaggeredProtocol::handle_child_recv() {
+void StaggeredProtocol::handle_child_recv()
+{
+    lora::StatusCode    status;
+    lora::IrqFlags      flags;
+    lora::packet_length length;
+
     // Verificar flags causadoras do IRQ
-    auto [status, flags] = m_Phys.get_flags();
+    etl::tie(status, flags) = m_Phys.get_flags();
     LORA_ASSERT(status);
 
     // Caso seja `false`, o radio foi utilizado por outro código além deste.
     if (~flags & lora::IRQ_RX_DONE) {
-        PORT_LOGW(TAG, "received IRQ without RX_DONE, expected child message (flags = %u)", flags);
+        PORT_LOGW(
+            TAG,
+            "received IRQ without RX_DONE, expected child message (flags = %u)",
+            flags
+        );
         return;
     }
-    
+
     m_Phys.clear_flags(lora::ALL_RX_FLAGS);
-    
+
     // Verificar se a recepção teve sucesso
     if (flags & lora::RX_ERROR_FLAGS) {
         PORT_LOGW(TAG, "received child message with errors");
         return;
     }
 
-    auto [status, length] = m_Phys.get_message_length();
+    etl::tie(status, length) = m_Phys.get_message_length();
     LORA_ASSERT(status);
 
     // Ler buffer da mensagem recebida
@@ -356,11 +366,7 @@ void StaggeredProtocol::handle_child_recv() {
     LORA_ASSERT(m_Phys.read_message(buffer, length));
 
     // Decodificar leituras recebidas
-    net::decode_readings(
-        m_LastReceivedReadings,
-        buffer,
-        length
-    );
+    net::decode_readings(m_LastReceivedReadings, buffer, length);
 }
 
 StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
@@ -472,7 +478,7 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
         // Caso o tempo de recepção tenha acabado
         if (events & EVENT_TIMER) {
             events &= ~EVENT_TIMER;
-            
+
             // Finalizar qualquer recepção que exceda a janela de RX
             LORA_ASSERT(m_Phys.standby());
 
@@ -503,21 +509,34 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
         /// @note Deve ser inalcançável.
         return m_State.rt_state.fsm;
     };
+
+    case StaggeredFSM::WAITING_TO_RX: {
+        /// @note Deve ser inalcançável.
+        abort();
+        return m_State.rt_state.fsm;
+    };
     }
+
+    PORT_LOGW(TAG, "reached end of 'on_state_event' with no return");
+    return m_State.rt_state.fsm;
 };
 
 void StaggeredProtocol::on_start()
 {
-    PORT_ISR_SAFE static void time_and_notify_isr(void *arg) {
-        auto self = static_cast<StaggeredProtocol *>(arg);
+    struct TimeAndNotify
+    {
+        PORT_ISR_SAFE static void isr(void *arg)
+        {
+            auto self = static_cast<StaggeredProtocol *>(arg);
 
-        self->m_MonoTimeAtISR_us = port::get_monotonic_time();
-        self->dispatch_events(EVENT_IRQ);
+            self->m_MonoTimeAtISR_us = port::get_monotonic_time();
+            self->dispatch_events(EVENT_IRQ);
+        };
     };
 
     // Configurar ISR
     m_Phys.set_isr({
-        .function = time_and_notify_isr,
+        .function = TimeAndNotify::isr,
         .argument = this,
     });
 

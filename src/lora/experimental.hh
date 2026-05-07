@@ -15,7 +15,6 @@
 
 #include "port/port.hh"
 
-
 namespace lora {
 constexpr size_t MAX_READINGS_IN_PACKET = 64;
 
@@ -61,7 +60,7 @@ struct RuntimeState
  */
 using PersistentState = net::State<RuntimeState>;
 
-class StaggeredProtocol : private port::EventTask
+class StaggeredProtocol : public port::EventTask
 {
 public:
     StaggeredProtocol(lora::IAsyncRadio &phys, PersistentState &state);
@@ -138,6 +137,7 @@ private:
 
     net::TrickleTimer m_Trickle;
 
-    etl::vector<net::OwnedReading, MAX_READINGS_IN_PACKET> m_LastReceivedReadings;
+    etl::vector<net::OwnedReading, MAX_READINGS_IN_PACKET>
+        m_LastReceivedReadings;
 };
 }  // namespace lora
