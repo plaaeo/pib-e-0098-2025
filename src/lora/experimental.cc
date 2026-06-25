@@ -546,6 +546,18 @@ void StaggeredProtocol::on_start()
     // O estado `WAITING_TO_RX` entra em deep sleep, e a transição ocorre ao
     // acordar do deep sleep.
     if (m_State.rt_state.fsm == StaggeredFSM::WAITING_TO_RX) {
+        port::time_us now = m_State.net_time.get_time_us();
+
+        // Caso o sono não tenha durado o suficiente, dormir novamente até o
+        // slot de recepção.
+        if (now < m_State.rt_state.expected_slot_wakeup_time +
+                      m_State.rt_state.slot_timer_calibration) {
+            port::enter_deep_sleep(
+                m_State.rt_state.expected_slot_wakeup_time +
+                m_State.rt_state.slot_timer_calibration - now
+            );
+        }
+
         m_State.rt_state.fsm = StaggeredFSM::RECEIVING_FROM_CHILDREN;
     }
 

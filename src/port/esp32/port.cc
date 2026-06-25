@@ -3,6 +3,7 @@
 #include <esp_random.h>
 #include <esp_sleep.h>
 #include <esp_timer.h>
+#include <etl/algorithm.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <rtc.h>
@@ -113,6 +114,8 @@ void unschedule(EventTask &task) noexcept
 
 void enter_deep_sleep(port::time_us duration) noexcept
 {
+    // HACK: Limitar sono até 5 minutos para evitar que o powerbank desligue.
+    duration = etl::min(duration, static_cast<port::time_us>(5 * 6e+7));
     esp_deep_sleep(duration);
 };
 
