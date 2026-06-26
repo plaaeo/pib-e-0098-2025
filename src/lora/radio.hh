@@ -129,8 +129,36 @@ struct Parameters
 
     constexpr port::time_us calculate_time_on_air(packet_length length) const
     {
+        auto symbolUs = calculate_symbol_time();
+
+        // Adicionar parte fracionária do preâmbulo
+        auto quarters = 17L, alpha = 8L;
+        if (spreading_factor == 5 || spreading_factor == 6) {
+            quarters = 25L;
+            alpha = 0L;
+        }
+
+        // Quantidade de bits da mensagem total
+        auto bits = etl::max(
+            (8L * length)                 // Bits do payload
+                + 16                      // Overhead do CRC
+                - (4 * spreading_factor)  //
+                + alpha                   //
+                + 20,                     // Comprimento do header
+            0L
+        );
+
+        // Quantidade de bits representáveis em um símbolo
+        auto bitsInSymbol = 4L * spreading_factor;
+        if (symbolUs > 16000)
+            bitsInSymbol -= 8L;
+
+        quarters +=
+            4L * (preamble_length + 8L +
+                  coding_rate * (bits + bitsInSymbol - 1) / bitsInSymbol);
+
         /// @todo
-        return 0;
+        return (quarters * symbolUs) / 4;
     }
 };
 

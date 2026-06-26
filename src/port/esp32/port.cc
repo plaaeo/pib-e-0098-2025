@@ -14,7 +14,7 @@
 #    define PORT_HAS_ISR_DISPATCH 0
 #endif
 
-#define PORT_TASK_STACK_SIZE 2048
+#define PORT_TASK_STACK_SIZE 4096
 
 namespace port {
 
@@ -83,7 +83,10 @@ bool schedule(EventTask &task) noexcept
                    port::event_bits ev;
                    while (task->m_Impl != nullptr) {
                        // Interromper execução até receber uma notificação.
-                       xTaskNotifyWait(0, 0xFFFFFFFF, &ev, portMAX_DELAY);
+                       assert(
+                           xTaskNotifyWait(0, 0xFFFFFFFF, &ev, portMAX_DELAY) ==
+                           pdTRUE
+                       );
                        task->run_once(ev);
                    }
 

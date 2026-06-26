@@ -3,7 +3,7 @@
 
 #define TRICKLE_REDUNDANCY_CONSTANT  2
 #define TRICKLE_MIN_INTERVAL_PACKETS 2
-#define TRICKLE_MAX_DOUBLINGS        4
+#define TRICKLE_MAX_DOUBLINGS        3
 
 constexpr static auto TAG = "proto.experimental";
 
@@ -33,7 +33,7 @@ StaggeredProtocol::StaggeredProtocol(
     , m_MonoTimeAtISR_us(0)
     , m_TimeoutTimer(port::make_event_isr<EVENT_TIMER>(*this))
     , m_Trickle(port::make_event_isr<EVENT_TRICKLE>(*this), state.trickle)
-    , m_LastReceivedReadings(){};
+    , m_LastReceivedReadings() {};
 
 void StaggeredProtocol::schedule(const sensor::Reading &reading) {
 
@@ -125,14 +125,16 @@ bool StaggeredProtocol::process_broadcast(const net::Broadcast &packet)
 
     // Salvar caso o nó escutado seja um potencial pai
     if (m_State.rank.hops == packet.rank.hops + 1) {
-        m_State.candidate_parents.add_or_update(net::ParentInfo{
-            net::NodeInfo{
-                .id = packet.id,
-                .rank = packet.rank,
-            },
-            .last_rssi = rssi,
-            .last_snr = snr,
-        });
+        m_State.candidate_parents.add_or_update(
+            net::ParentInfo{
+                net::NodeInfo{
+                    .id = packet.id,
+                    .rank = packet.rank,
+                },
+                .last_rssi = rssi,
+                .last_snr = snr,
+            }
+        );
     }
 
     return reportInconsistency;
@@ -193,7 +195,7 @@ void StaggeredProtocol::on_state_enter()
     case StaggeredFSM::INITIALIZED: {
         // Envia um broadcast falso
         m_Phys.send({
-            .data = (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x02\x40\x01\x04",
+            .data = (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x02\x40\x04\x04",
             .length = 10,
         });
 
@@ -259,6 +261,10 @@ void StaggeredProtocol::on_state_enter()
     };
 
     case StaggeredFSM::WAITING_TO_RX: {
+        // Ordenar lista de pais candidatos pelo melhor
+        if (auto parent = m_State.candidate_parents.sort_by_objective())
+            PORT_LOGI(TAG, "%hhu is my preferred parent", *parent);
+
         // Tentar configurar o modo de menor consumo energético
         if (m_Phys.sleep() != lora::StatusCode::ok)
             LORA_ASSERT(m_Phys.standby());
@@ -285,8 +291,9 @@ void StaggeredProtocol::on_state_enter()
         m_TimeoutTimer.start_once(m_State.calculate_slot_duration());
 
         // Configurar parâmetros de comunicação direta
-        LORA_ASSERT(m_Phys.set_parameters(m_State.calculate_personal_parameters(
-        )));
+        LORA_ASSERT(
+            m_Phys.set_parameters(m_State.calculate_personal_parameters())
+        );
 
         // Iniciar recepção sem timeout
         LORA_ASSERT(m_Phys.recv({
@@ -312,11 +319,42 @@ void StaggeredProtocol::on_state_enter()
 
     case StaggeredFSM::TRANSMITTING_TO_PARENT: {
         /// @todo Inserir a leitura deste nó em m_LastReceivedReadings
+        if (!m_LastReceivedReadings.full())
+            m_LastReceivedReadings.push_back(
+                net::OwnedReading{
+                    .id = m_State.id,
+                    .reading = {
+                        .time = static_cast<uint32_t>(
+                            m_State.net_time.get_time_us() / 1000000U
+                        ),
+                        .temperature = static_cast<uint16_t>(m_State.id),
+                        .tds = static_cast<uint16_t>(m_State.id + 1U),
+                        .ph = static_cast<uint16_t>(m_State.id + 2U),
+                    }
+                }
+            );
+
+        PORT_LOGI(TAG, " -- readings (%hhu) --", m_State.id);
+        for (auto &x : m_LastReceivedReadings) {
+            PORT_LOGI(
+                TAG, "<%hhu> %hu degC, %hu ppm, %hu pH at %u seconds", x.id,
+                x.reading.temperature, x.reading.tds, x.reading.ph,
+                x.reading.time
+            );
+        }
+        PORT_LOGI(TAG, " -- readings --");
+
         uint8_t buffer[UINT8_MAX];
 
         // Codifica todas as leituras atuais
         auto length =
             net::encode_readings(m_LastReceivedReadings, buffer, UINT8_MAX);
+
+        // Configurar parâmetros de comunicação direta
+        LORA_ASSERT(m_Phys.set_parameters(
+            m_State.candidate_parents.candidate_parents.front()
+                .calculate_personal_parameters()
+        ));
 
         assert(length > 0);
 
@@ -335,6 +373,8 @@ void StaggeredProtocol::handle_child_recv()
     lora::StatusCode    status;
     lora::IrqFlags      flags;
     lora::packet_length length;
+
+    PORT_LOGI(TAG, "received child message");
 
     // Verificar flags causadoras do IRQ
     etl::tie(status, flags) = m_Phys.get_flags();
@@ -399,12 +439,10 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
                 PORT_LOGI(
                     TAG, "suppressed broadcast due to channel occupation"
                 );
-                return StaggeredFSM::RECEIVING_BROADCASTS;
             }
-
             // Caso não estejamos no tempo máximo do trickle, sempre devemos
             // transmitir
-            if (!m_State.trickle.is_capped())
+            else if (!m_State.trickle.is_capped())
                 return StaggeredFSM::SENDING_BROADCAST;
 
             // Decidir se a rede está estável ou não

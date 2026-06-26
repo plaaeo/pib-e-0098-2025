@@ -128,6 +128,11 @@ struct NodeInfo
     }
 };
 
+constexpr NodeInfo gateway_node = {
+    .id = GATEWAY_ID,
+    .rank = Rank::from(0),
+};
+
 /**
  * @brief Representa as informações de um vizinho potencialmente pai
  * do nó. Atualizado apenas durante a fase de inicialização.

@@ -116,7 +116,7 @@ protected:
     inline EventTask(task_priority priority)
         : m_Impl(nullptr)
         , m_Priority(priority)
-        , m_Pending(0){};
+        , m_Pending(0) {};
 
     /**
      * @brief Executado ao criar a task.
@@ -139,7 +139,7 @@ private:
     inline void run_once(event_bits ev)
     {
         m_Pending |= ev;
-        m_Pending &= ~on_event(m_Pending);
+        m_Pending &= on_event(m_Pending);
     }
 
     /**

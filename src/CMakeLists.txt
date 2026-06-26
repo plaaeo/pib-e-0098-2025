@@ -7,6 +7,7 @@ idf_component_register(
     ${CMAKE_SOURCE_DIR}/src/lora/radios/radiolib.cc
     ${CMAKE_SOURCE_DIR}/src/net/trickle.cc
     ${CMAKE_SOURCE_DIR}/src/net/types.cc
+    ${CMAKE_SOURCE_DIR}/src/net/packets.cc
     ${CMAKE_SOURCE_DIR}/src/port/esp32/main.cc
     ${CMAKE_SOURCE_DIR}/src/port/esp32/port.cc
     ${CMAKE_SOURCE_DIR}/src/sensor/interface.cc

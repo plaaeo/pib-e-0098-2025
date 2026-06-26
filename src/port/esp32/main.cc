@@ -103,18 +103,18 @@ RTC_DATA_ATTR lora::PersistentState g_State = {
     .candidate_parents = {},
 };
 
-Module            g_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
-LORA_RADIO        g_LoraPhy = LORA_RADIO(&g_Module);
-lora::RadioLibPhy g_Phy(g_LoraPhy);
-
-//< Interface para envio de leituras de sensor.
-lora::StaggeredProtocol g_Proto(g_Phy, g_State);
-
 /**
  * @brief Task do nó sensor.
  */
 void task_sensor()
 {
+    static Module     s_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
+    static LORA_RADIO s_LoraPhy = LORA_RADIO(&s_Module);
+    static lora::RadioLibPhy s_Phy(s_LoraPhy);
+
+    //< Interface para envio de leituras de sensor.
+    static lora::StaggeredProtocol s_Proto(s_Phy, g_State);
+
     // Tentar inicializar I2C do ADS1115
     if (!Wire.begin(ADS1115_SDA, ADS1115_SCL)) {
         PORT_LOGW(
@@ -131,15 +131,84 @@ void task_sensor()
     }
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-    g_LoraPhy.begin(915.0f);
-    g_LoraPhy.forceLDRO(false);
+    s_LoraPhy.begin(915.0f);
+    s_LoraPhy.forceLDRO(false);
 
-    g_State.id = g_LoraPhy.randomByte();
+    // Usar `UINT8_MAX` como detector de 'estado não inicializado' por enquanto
+    while (g_State.id == UINT8_MAX)
+        g_State.id = s_LoraPhy.randomByte();
 
-    if (!port::schedule(g_Proto)) {
+    if (!port::schedule(s_Proto)) {
         PORT_LOGW(TAG, "falha ao incializar protocolo");
     }
 }
+
+#ifdef GATEWAY
+
+struct Gateway : public port::EventTask
+{
+    static net::SlotTimingInfo s_TimingInfo = {
+        .tdm_subslot_guard_symbols = 0x02,
+        .tdm_subslot_mtu_bytes = 0x80,
+        .tdm_subslot_count = 0x04,
+        .tdm_slot_count = 0x10,
+    };
+
+    void on_start() override {
+
+    };
+
+    event_bits on_event(event_bits ev) override {
+
+    };
+}
+
+void task_gateway()
+{
+    static Module     s_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
+    static LORA_RADIO s_LoraPhy = LORA_RADIO(&s_Module);
+    static lora::RadioLibPhy s_Phy(s_LoraPhy);
+
+    //< Interface para envio de leituras de sensor.
+    static lora::StaggeredProtocol s_Proto(s_Phy, g_State);
+
+    // Inicializar interface LoRa
+    SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+    s_LoraPhy.begin(915.0f);
+    s_LoraPhy.forceLDRO(false);
+
+    // Definir parâmetros comuns
+    s_Phy.set_parameters(net::gateway_node.calculate_personal_parameters());
+
+    uint8_t buffer[UINT8_MAX];
+
+    /// @todo init gateway (gw::setup)
+    /// @todo all other gw stuff
+
+    // Loop de operação geral do gateway
+    for (;;) {
+        net::Broadcast broadcast{
+            .reference_time_us = 0,
+            .id = net::gateway_node.id,
+            .rank = net::gateway_node.rank,
+            .slot_info = s_TimingInfo,
+            .max_hops = net::UNKNOWN_MAX_HOPS
+        };
+
+        auto length = broadcast.encode(buffer, UINT8_MAX);
+        assert(length > 0);
+
+        // Enviar broadcast inicial
+        s_Phy.send({
+            .data = buffer,
+            .length = length,
+        });
+
+        /// @todo make event task from this for gw operation
+    }
+}
+
+#endif
 
 //< Função `main` do protótipo
 extern "C" void app_main(void)
