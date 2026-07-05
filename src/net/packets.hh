@@ -10,7 +10,7 @@ constexpr static auto TAG = "net";
 
 struct Broadcast
 {
-    constexpr static size_t BROADCAST_MAX_SIZE = 11;
+    constexpr static size_t BROADCAST_MAX_SIZE = 12;
 
     /**
      * @brief O tempo, em microsegundos, passado desde o fim da transmissão do

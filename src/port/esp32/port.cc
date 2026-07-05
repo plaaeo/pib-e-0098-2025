@@ -118,7 +118,7 @@ void unschedule(EventTask &task) noexcept
 void enter_deep_sleep(port::time_us duration) noexcept
 {
     // HACK: Limitar sono até 15 segundos para evitar que o powerbank desligue.
-    duration = etl::min(duration, static_cast<port::time_us>(5e+6));
+    duration = etl::min(duration, HEARTBEAT_PERIOD);
     esp_deep_sleep(duration);
 };
 

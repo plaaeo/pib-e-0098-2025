@@ -17,11 +17,12 @@ etl::optional<Broadcast> Broadcast::decode(uint8_t *buffer, size_t length)
     out.slot_info.tdm_subslot_mtu_bytes = buffer[7];
     out.slot_info.tdm_subslot_count = buffer[8];
     out.slot_info.tdm_slot_count = buffer[9];
+    out.slot_info.tdm_frame_count = buffer[10];
     out.max_hops = net::UNKNOWN_MAX_HOPS;
 
     // Decodificar `max_hops` caso presente
     if (length == BROADCAST_MAX_SIZE)
-        out.max_hops = buffer[10];
+        out.max_hops = buffer[11];
 
     return etl::optional<Broadcast>{out};
 };
@@ -41,10 +42,11 @@ size_t Broadcast::encode(uint8_t *buffer, size_t length) const
     buffer[7] = slot_info.tdm_subslot_mtu_bytes;
     buffer[8] = slot_info.tdm_subslot_count;
     buffer[9] = slot_info.tdm_slot_count;
+    buffer[10] = slot_info.tdm_frame_count;
 
     // Codificar `max_hops` caso presente
     if (max_hops != net::UNKNOWN_MAX_HOPS) {
-        buffer[10] = max_hops;
+        buffer[11] = max_hops;
         return BROADCAST_MAX_SIZE;
     }
 

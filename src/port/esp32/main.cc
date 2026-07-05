@@ -103,11 +103,64 @@ RTC_DATA_ATTR lora::PersistentState g_State = {
     .candidate_parents = {},
 };
 
+#ifdef HEARTBEAT_PIN
+
+struct Heartbeat : public port::EventTask
+{
+    bool        m_IsHigh;
+    port::Timer m_Timer;
+
+    Heartbeat()
+        : port::EventTask(0)
+        , m_IsHigh(false)
+        , m_Timer(port::make_event_isr<1>(*this)) {};
+
+    /// @brief Inicializar GPIO do heartbeat e iniciar o timer no período máximo
+    void on_start() override
+    {
+        gpio_set_direction(HEARTBEAT_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(HEARTBEAT_PIN, 1);
+        m_IsHigh = true;
+        m_Timer.start_once(port::HEARTBEAT_HIGH_DURATION);
+    }
+
+    /// @brief Realizar o heartbeat alternando o nível do GPIO e reiniciando o
+    /// timer.
+    port::event_bits on_event(port::event_bits ev) override
+    {
+        if (ev != 1) {
+            return 0;
+        }
+
+        gpio_set_level(HEARTBEAT_PIN, !m_IsHigh);
+        m_Timer.start_once(
+            m_IsHigh ? port::HEARTBEAT_PERIOD : port::HEARTBEAT_HIGH_DURATION
+        );
+
+        PORT_LOGD(
+            "heartbeat", "turning %s (%llu)", m_IsHigh ? "off" : "on",
+            m_IsHigh ? port::HEARTBEAT_PERIOD : port::HEARTBEAT_HIGH_DURATION
+        );
+        m_IsHigh = !m_IsHigh;
+
+        return 0;
+    }
+};
+
+#endif
+
 /**
  * @brief Task do nó sensor.
  */
 void task_sensor()
 {
+#ifdef HEARTBEAT_PIN
+    static Heartbeat s_Heartbeat{};
+    if (!port::schedule(s_Heartbeat)) {
+        PORT_LOGW(TAG, "falha ao incializar heartbeat");
+    }
+#endif
+
     static Module     s_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
     static LORA_RADIO s_LoraPhy = LORA_RADIO(&s_Module);
     static lora::RadioLibPhy s_Phy(s_LoraPhy);
@@ -161,7 +214,7 @@ struct Gateway : public port::EventTask
     event_bits on_event(event_bits ev) override {
 
     };
-}
+};
 
 void task_gateway()
 {

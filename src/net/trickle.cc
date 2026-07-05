@@ -52,6 +52,11 @@ bool TrickleTimer::update_and_check()
     if (m_State == nullptr || !m_Running)
         return false;
 
+    // Se o timer ainda está rodando, não houve timeout ainda, logo, não é hora
+    // de transmitir nem de atualizar o estado do trickle.
+    if (m_Timer.is_running())
+        return false;
+
     // Verificar se o timeout ocorreu no tempo `t`
     auto timeNow = port::get_rtc_time();
     auto endTime = m_State->calculate_interval_end_time();

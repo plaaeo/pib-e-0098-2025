@@ -199,6 +199,7 @@ struct SlotTimingInfo
     uint8_t tdm_subslot_mtu_bytes;
     uint8_t tdm_subslot_count;
     uint8_t tdm_slot_count;
+    uint8_t tdm_frame_count;
 };
 
 template <typename RtState>

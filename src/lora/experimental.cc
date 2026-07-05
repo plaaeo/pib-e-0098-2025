@@ -205,6 +205,9 @@ void StaggeredProtocol::on_state_enter()
     case StaggeredFSM::RECEIVING_BROADCASTS: {
         PORT_LOGI(TAG, "starting broadcast rx session");
 
+        // Configurar parâmetros iniciais conhecidos padrão
+        LORA_ASSERT(m_Phys.set_parameters(m_Params));
+
         // Iniciar recepção sem timeout
         LORA_ASSERT(m_Phys.recv({
             .irq_flags_mask = lora::ALL_RX_FLAGS,
@@ -530,6 +533,12 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
         // Caso o tempo de espera tenha acabado
         if (events & EVENT_TIMER) {
             events &= ~EVENT_TIMER;
+
+            // Caso esse tenha sido o último frame, a rede deve resetar.
+            if (m_State.slot_info.tdm_frame_count == 0)
+                return StaggeredFSM::RECEIVING_BROADCASTS;
+
+            m_State.slot_info.tdm_frame_count--;
             return StaggeredFSM::TRANSMITTING_TO_PARENT;
         }
 
@@ -577,9 +586,6 @@ void StaggeredProtocol::on_start()
         .function = TimeAndNotify::isr,
         .argument = this,
     });
-
-    // Configurar parâmetros iniciais conhecidos padrão
-    m_Phys.set_parameters(m_Params);
 
     // O estado `WAITING_TO_RX` entra em deep sleep, e a transição ocorre ao
     // acordar do deep sleep.

@@ -32,6 +32,9 @@ struct ISR
  */
 using time_us = int64_t;
 
+constexpr static port::time_us HEARTBEAT_HIGH_DURATION = 2500;
+constexpr static port::time_us HEARTBEAT_PERIOD = 9e+6;
+
 /**
  * @returns Uma medida de tempo monotônica (sempre crescente), em
  * microssegundos.
