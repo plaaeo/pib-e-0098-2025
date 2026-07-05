@@ -20,16 +20,7 @@ StaggeredProtocol::StaggeredProtocol(
     : port::EventTask(2)
     , m_Phys(phys)
     , m_State(state)
-    , m_Params({
-          .freq_hz = 915000000,
-          .bandwidth_hz = 125000,
-          .preamble_length = 12,
-          .power_db = 5,
-          .spreading_factor = 12,
-          .coding_rate = 5,
-          .sync_word = 0x77,
-          .implicit_header = false,
-      })
+    , m_Params(net::gateway_node.calculate_personal_parameters())
     , m_MonoTimeAtISR_us(0)
     , m_TimeoutTimer(port::make_event_isr<EVENT_TIMER>(*this))
     , m_Trickle(port::make_event_isr<EVENT_TRICKLE>(*this), state.trickle)
@@ -195,8 +186,9 @@ void StaggeredProtocol::on_state_enter()
     case StaggeredFSM::INITIALIZED: {
         // Envia um broadcast falso
         m_Phys.send({
-            .data = (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x02\x40\x04\x04",
-            .length = 10,
+            .data =
+                (const uint8_t *)"\x00\x00\x00\x00\x00\x00\x02\x40\x04\x04\xFF",
+            .length = 11,
         });
 
         return;

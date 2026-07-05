@@ -200,19 +200,108 @@ void task_sensor()
 
 struct Gateway : public port::EventTask
 {
+    constexpr static port::event_bits EVENT_BROADCAST = 1 << 0;
+    constexpr static port::event_bits EVENT_IRQ = 1 << 1;
+
     static net::SlotTimingInfo s_TimingInfo = {
         .tdm_subslot_guard_symbols = 0x02,
         .tdm_subslot_mtu_bytes = 0x80,
         .tdm_subslot_count = 0x04,
         .tdm_slot_count = 0x10,
+        .tdm_frame_count = 0x7f,
     };
 
-    void on_start() override {
+    static lora::IAsyncRadio &m_Phys;
+    port::Timer               m_BroadcastTimer;
+    net::Clock                m_NetTime;
 
+    Gateway(lora::IAsyncRadio &phy)
+        : port::EventTask(0)
+        , m_Phys(phy)
+        , m_BroadcastTimer(port::make_event_isr<EVENT_BROADCAST>(*this))
+        , m_NetTime() {};
+
+    void on_start() override
+    {
+        // Configurar ISR
+        m_Phys.set_isr(port::make_event_isr<EVENT_IRQ>(*this));
+
+        // Definir parâmetros comuns
+        LORA_ASSERT(m_Phys.set_parameters(
+            net::gateway_node.calculate_personal_parameters()
+        ));
+
+        // Aguardar 30 segundos para o broadcast inicial da rede
+        m_BroadcastTimer.start_once(30e+6);
     };
 
-    event_bits on_event(event_bits ev) override {
+    event_bits on_event(event_bits ev) override
+    {
+        lora::IrqFlags      flags;
+        lora::StatusCode    status;
+        lora::packet_length length;
+        uint8_t             buffer[UINT8_MAX];
 
+        // Ao receber um IRQ do radio
+        if (ev & EVENT_IRQ) {
+            etl::tie(status, flags) = m_Phys.get_flags();
+            LORA_ASSERT(status);
+
+            // Ler pacote se algum foi recebido
+            if (flags & lora::IrqFlags::IRQ_RX_DONE) {
+                etl::tie(status, length) = m_Phys.get_message_length();
+                LORA_ASSERT(status);
+                LORA_ASSERT(m_Phys.read_message(buffer, length));
+
+                /// @todo enviar para o servidor
+            }
+
+            // Após transmitir um broadcast
+            if (flags & lora::IrqFlags::IRQ_TX_DONE) {
+                // Definir o tempo atual como tempo de início da rede
+                m_NetTime.synchronize(0, port::get_monotonic_time());
+
+                // Reiniciar a rede (enviar outro broadcast) no próximo ciclo +
+                // 30 segundos
+                m_BroadcastTimer.start_once(
+                    s_TimingInfo.calculate_network_cycle_duration() + 30e+6
+                );
+
+                PORT_LOGI(
+                    TAG, "sent initial network broadcast at %lluus",
+                    port::get_rtc_time()
+                );
+
+                // Iniciar recepção contínua de pacotes de nós filhos
+                LORA_ASSERT(m_Phys.recv({
+                    .irq_flags_mask = lora::ALL_RX_FLAGS,
+                    .irq_dispatch_mask = lora::IRQ_RX_DONE,
+                    .length = 0,
+                    .continuous = true,
+                }));
+            }
+        }
+
+        // Enviar broadcast caso seja hora
+        if (ev & EVENT_BROADCAST) {
+            net::Broadcast broadcast{
+                .reference_time_us = 0,
+                .id = net::gateway_node.id,
+                .rank = net::gateway_node.rank,
+                .slot_info = s_TimingInfo,
+                .max_hops = net::UNKNOWN_MAX_HOPS
+            };
+
+            auto length = broadcast.encode(buffer, UINT8_MAX);
+            assert(length > 0);
+
+            LORA_ASSERT(m_Phys.send({
+                .data = buffer,
+                .length = length,
+            }));
+        }
+
+        return ev;
     };
 };
 
@@ -222,42 +311,16 @@ void task_gateway()
     static LORA_RADIO s_LoraPhy = LORA_RADIO(&s_Module);
     static lora::RadioLibPhy s_Phy(s_LoraPhy);
 
-    //< Interface para envio de leituras de sensor.
-    static lora::StaggeredProtocol s_Proto(s_Phy, g_State);
-
     // Inicializar interface LoRa
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     s_LoraPhy.begin(915.0f);
     s_LoraPhy.forceLDRO(false);
 
-    // Definir parâmetros comuns
-    s_Phy.set_parameters(net::gateway_node.calculate_personal_parameters());
-
-    uint8_t buffer[UINT8_MAX];
-
     /// @todo init gateway (gw::setup)
-    /// @todo all other gw stuff
 
-    // Loop de operação geral do gateway
-    for (;;) {
-        net::Broadcast broadcast{
-            .reference_time_us = 0,
-            .id = net::gateway_node.id,
-            .rank = net::gateway_node.rank,
-            .slot_info = s_TimingInfo,
-            .max_hops = net::UNKNOWN_MAX_HOPS
-        };
-
-        auto length = broadcast.encode(buffer, UINT8_MAX);
-        assert(length > 0);
-
-        // Enviar broadcast inicial
-        s_Phy.send({
-            .data = buffer,
-            .length = length,
-        });
-
-        /// @todo make event task from this for gw operation
+    static Gateway s_Gateway(s_Phy);
+    if (!port::schedule(s_Gateway)) {
+        PORT_LOGW(TAG, "falha ao incializar gateway");
     }
 }
 

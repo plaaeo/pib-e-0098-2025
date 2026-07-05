@@ -200,6 +200,53 @@ struct SlotTimingInfo
     uint8_t tdm_subslot_count;
     uint8_t tdm_slot_count;
     uint8_t tdm_frame_count;
+
+    /**
+     * @brief Calcula a duração de um subslot completo da rede. Um subslot
+     * equivale à um tempo de transmissão máximo, de um filho para seu pai,
+     * alocado para um único filho.
+     */
+    constexpr port::time_us calculate_subslot_duration() const noexcept
+    {
+        // Calcular a duração de um subslot
+        port::time_us duration =
+            BASE_PARAMETERS.calculate_time_on_air(tdm_subslot_mtu_bytes);
+
+        // Somar gap entre subslots
+        duration +=
+            tdm_subslot_guard_symbols * BASE_PARAMETERS.calculate_symbol_time();
+
+        return duration;
+    }
+
+    /**
+     * @brief Calcula a duração de um slot completo da rede. Um slot equivale à
+     * um período único de transmissão de dados dos nós filhos aos seus
+     * respectivos pais.
+     */
+    constexpr port::time_us calculate_slot_duration() const noexcept
+    {
+        return calculate_subslot_duration() * tdm_subslot_count;
+    }
+
+    /**
+     * @brief Calcula a duração de uma contagem completa de slots da rede.
+     * Um frame equivale à um período único de transmissão de dados dos nós
+     * filhos aos seus respectivos pais, para todos os nós da rede.
+     */
+    constexpr port::time_us calculate_frame_duration() const noexcept
+    {
+        return calculate_slot_duration() * tdm_slot_count;
+    }
+
+    /**
+     * @brief Calcula a duração de um ciclo completo da rede. Um ciclo
+     * equivale a `tdm_frame_count` frames.
+     */
+    constexpr port::time_us calculate_network_cycle_duration() const noexcept
+    {
+        return calculate_frame_duration() * tdm_frame_count;
+    }
 };
 
 template <typename RtState>
@@ -240,32 +287,27 @@ struct State : public NodeInfo
     net::CandidateParents candidate_parents;
 
     /**
-     * @brief Calcula a duração de um subslot completo da rede. Um subslot
-     * equivale à um tempo de transmissão máximo, de um filho para seu pai,
-     * alocado para um único filho.
+     * @brief Mesmo que `slot_info.calculate_subslot_duration()`.
      */
     constexpr port::time_us calculate_subslot_duration() const noexcept
     {
-        // Calcular a duração de um subslot
-        port::time_us duration = BASE_PARAMETERS.calculate_time_on_air(
-            slot_info.tdm_subslot_mtu_bytes
-        );
-
-        // Somar gap entre subslots
-        duration += slot_info.tdm_subslot_guard_symbols *
-                    BASE_PARAMETERS.calculate_symbol_time();
-
-        return duration;
+        return slot_info.calculate_subslot_duration();
     }
 
     /**
-     * @brief Calcula a duração de um slot completo da rede. Um slot equivale à
-     * um período único de transmissão de dados dos nós filhos aos seus
-     * respectivos pais.
+     * @brief Mesmo que `slot_info.calculate_slot_duration()`.
      */
     constexpr port::time_us calculate_slot_duration() const noexcept
     {
-        return calculate_subslot_duration() * slot_info.tdm_subslot_count;
+        return slot_info.calculate_slot_duration();
+    }
+
+    /**
+     * @brief Mesmo que `slot_info.calculate_frame_duration()`.
+     */
+    constexpr port::time_us calculate_frame_duration() const noexcept
+    {
+        return slot_info.calculate_frame_duration();
     }
 
     /**
