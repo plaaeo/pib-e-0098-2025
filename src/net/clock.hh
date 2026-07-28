@@ -23,6 +23,15 @@ struct Clock
     };
 
     /**
+     * @brief Retorna o tempo que se passou desde o início da rede, em
+     * microsegundos.
+     */
+    port::time_us get_elapsed_time_us() const
+    {
+        return port::get_rtc_time() - network_time_offset_us;
+    };
+
+    /**
      * @brief Sincroniza o timer com um tempo recebido da rede.
      * @param externalTimestamp_us Uma medida de tempo externa recebida da rede
      * em microsegundos.

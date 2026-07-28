@@ -1,21 +1,24 @@
-#include <Adafruit_ADS1X15.h>
 #include <Arduino.h>
 #include <esp_log.h>
 #include <esp_pm.h>
 #include <esp_task_wdt.h>
 #include <esp_wifi.h>
+#include <etl/vector.h>
 #include <freertos/task.h>
 #include <cstdint>
-
-#include "lora/experimental.hh"
 #include "lora/radios/radiolib.hh"
-
-#include "sensor/interface.hh"
-#include "sensor/ph.hh"
-#include "sensor/tds.hh"
-#include "sensor/temperature.hh"
+#include "port/port.hh"
 
 constexpr auto TAG = "sens";
+
+#ifndef GATEWAY
+#    include <Adafruit_ADS1X15.h>
+#    include "lora/experimental.hh"
+
+#    include "sensor/interface.hh"
+#    include "sensor/ph.hh"
+#    include "sensor/tds.hh"
+#    include "sensor/temperature.hh"
 
 RTC_DATA_ATTR static struct
 {
@@ -103,7 +106,7 @@ RTC_DATA_ATTR lora::PersistentState g_State = {
     .candidate_parents = {},
 };
 
-#ifdef HEARTBEAT_PIN
+#    ifdef HEARTBEAT_PIN
 
 struct Heartbeat : public port::EventTask
 {
@@ -147,19 +150,19 @@ struct Heartbeat : public port::EventTask
     }
 };
 
-#endif
+#    endif  // HEARTBEAT_PIN
 
 /**
  * @brief Task do nó sensor.
  */
 void task_sensor()
 {
-#ifdef HEARTBEAT_PIN
+#    ifdef HEARTBEAT_PIN
     static Heartbeat s_Heartbeat{};
     if (!port::schedule(s_Heartbeat)) {
         PORT_LOGW(TAG, "falha ao incializar heartbeat");
     }
-#endif
+#    endif
 
     static Module     s_Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_BUSY, SPI);
     static LORA_RADIO s_LoraPhy = LORA_RADIO(&s_Module);
@@ -196,7 +199,7 @@ void task_sensor()
     }
 }
 
-#ifdef GATEWAY
+#else
 
 struct Gateway : public port::EventTask
 {
@@ -205,9 +208,9 @@ struct Gateway : public port::EventTask
 
     static net::SlotTimingInfo s_TimingInfo = {
         .tdm_subslot_guard_symbols = 0x02,
-        .tdm_subslot_mtu_bytes = 0x80,
-        .tdm_subslot_count = 0x04,
-        .tdm_slot_count = 0x10,
+        .tdm_subslot_mtu_bytes = 0x40,
+        .tdm_subslot_count = 0x02,
+        .tdm_slot_count = 0x20,
         .tdm_frame_count = 0x7f,
     };
 
@@ -237,10 +240,11 @@ struct Gateway : public port::EventTask
 
     event_bits on_event(event_bits ev) override
     {
-        lora::IrqFlags      flags;
-        lora::StatusCode    status;
-        lora::packet_length length;
-        uint8_t             buffer[UINT8_MAX];
+        lora::IrqFlags                     flags;
+        lora::StatusCode                   status;
+        lora::packet_length                length;
+        uint8_t                            buffer[UINT8_MAX];
+        etl::vector<net::OwnedReading, 32> readings;
 
         // Ao receber um IRQ do radio
         if (ev & EVENT_IRQ) {
@@ -254,6 +258,17 @@ struct Gateway : public port::EventTask
                 LORA_ASSERT(m_Phys.read_message(buffer, length));
 
                 /// @todo enviar para o servidor
+                net::decode_readings(readings, buffer, length);
+
+                for (auto &reading : readings) {
+                    auto decompressed = reading.reading.decompress();
+                    PORT_LOGI(
+                        TAG,
+                        "reading from %hhu: time=%u, temp=%f, tds=%f, ph=%f",
+                        reading.id, decompressed.time, decompressed.temperature,
+                        decompressed.tds, decompressed.ph
+                    );
+                }
             }
 
             // Após transmitir um broadcast

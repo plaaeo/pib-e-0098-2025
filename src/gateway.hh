@@ -7,7 +7,8 @@
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 
-#include "sensors.hh"
+#include "net/clock.hh"
+#include "sensor/reading.hh"
 
 //< Possui os '#define's com chave de API do Firebase, URL, login do Wifi, etc.
 #include "secret.hh"
@@ -38,11 +39,8 @@ FirebaseAuth   auth;
 FirebaseData   fbData;
 
 //< Retorna uma string identificando a data e hora atuais.
-String getCurrentTimestamp()
+String get_timestamp(time_t t)
 {
-    time_t t;
-    time(&t);
-
     // Obter tempo em formato local
     struct tm timeinfo;
     localtime_r(&t, &timeinfo);
@@ -53,7 +51,7 @@ String getCurrentTimestamp()
 
     // Mover os dígitos do fuso horário (https://stackoverflow.com/a/48772690)
     if (len > 1) {
-        char minute[] = { buffer[len - 2], buffer[len - 1], '\0' };
+        char minute[] = {buffer[len - 2], buffer[len - 1], '\0'};
         sprintf(buffer + len - 2, ":%s", minute);
     }
 
@@ -107,10 +105,14 @@ void setup()
     PORT_LOGI(TAG, "Firebase initialized.");
 }
 
-//< Envia uma unica `sens::reading_t` para o Firestore.
-void send_reading_firestore(const sens::Reading &reading)
+//< Envia uma unica `sensor::Reading` para o Firestore.
+void send_reading_firestore(
+    const sensor::Reading &reading,
+    const net::Clock      &clock
+)
 {
-    auto timestamp = getCurrentTimestamp();
+    auto timediff_us = clock.get_time_us() - (reading.time * 1000000U);
+    auto timestamp = get_timestamp(time(NULL) - (timediff_us / 1000000U));
 
     // Aguardar o Firebase estar pronto (?)
     PORT_LOGI(TAG, "Aguardando o Firebase...");
@@ -132,9 +134,9 @@ void send_reading_firestore(const sens::Reading &reading)
         const char *id;
         float       valor;
     } coletas[] = {
-        { "temperatura", reading.temperature },
-        { "ph", reading.ph },
-        { "tds", reading.tds },
+        {"temperatura", reading.temperature},
+        {"ph", reading.ph},
+        {"tds", reading.tds},
     };
 
     for (auto &coleta : coletas) {
@@ -142,9 +144,11 @@ void send_reading_firestore(const sens::Reading &reading)
         json.set("fields/valor/doubleValue", coleta.valor);
 
         // Criar documento no Firestore
-        if (Firebase.Firestore.createDocument(
-                &fbData, FIREBASE_PROJECT_ID, "", "leiturasSensores", json.raw()
-            )) {
+        auto result = Firebase.Firestore.createDocument(
+            &fbData, FIREBASE_PROJECT_ID, "", "leiturasSensores", json.raw()
+        );
+
+        if (result) {
             PORT_LOGI(
                 TAG, "Coleta de '%s' enviada para o Firestore", coleta.id
             );
