@@ -14,21 +14,19 @@ constexpr port::event_bits EVENT_TIMER = (1U << 2);
 constexpr port::event_bits EVENT_TRICKLE = (1U << 3);
 
 StaggeredProtocol::StaggeredProtocol(
+    ReadingGenerator  generator,
     lora::IAsyncRadio &phys,
     PersistentState   &state
 )
     : port::EventTask(2)
     , m_Phys(phys)
     , m_State(state)
+    , m_Generator(generator)
     , m_Params(net::gateway_node.calculate_personal_parameters())
     , m_MonoTimeAtISR_us(0)
     , m_TimeoutTimer(port::make_event_isr<EVENT_TIMER>(*this))
     , m_Trickle(port::make_event_isr<EVENT_TRICKLE>(*this), state.trickle)
     , m_LastReceivedReadings() {};
-
-void StaggeredProtocol::schedule(const sensor::Reading &reading) {
-
-};
 
 bool StaggeredProtocol::process_broadcast(const net::Broadcast &packet)
 {
@@ -313,21 +311,16 @@ void StaggeredProtocol::on_state_enter()
     }
 
     case StaggeredFSM::TRANSMITTING_TO_PARENT: {
-        /// @todo Inserir a leitura deste nó em m_LastReceivedReadings
-        if (!m_LastReceivedReadings.full())
+        // Inserir a leitura deste nó em m_LastReceivedReadings
+        if (!m_LastReceivedReadings.full()) {
+            auto reading = (m_Generator)(m_State.net_time);
             m_LastReceivedReadings.push_back(
                 net::OwnedReading{
                     .id = m_State.id,
-                    .reading = {
-                        .time = static_cast<uint32_t>(
-                            m_State.net_time.get_time_us() / 1000000U
-                        ),
-                        .temperature = static_cast<uint16_t>(m_State.id),
-                        .tds = static_cast<uint16_t>(m_State.id + 1U),
-                        .ph = static_cast<uint16_t>(m_State.id + 2U),
-                    }
+                    .reading = repr::CompressedReading::compress(reading),
                 }
             );
+        }
 
         PORT_LOGI(TAG, " -- readings (%hhu) --", m_State.id);
         for (auto &x : m_LastReceivedReadings) {

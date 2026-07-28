@@ -60,16 +60,12 @@ struct RuntimeState
  */
 using PersistentState = net::State<RuntimeState>;
 
+using ReadingGenerator = sensor::Reading(*)(const net::Clock &);
+
 class StaggeredProtocol : public port::EventTask
 {
 public:
-    StaggeredProtocol(lora::IAsyncRadio &phys, PersistentState &state);
-
-    /**
-     * @brief Agenda a transmissão de uma leitura de sensor quando possível.
-     * @param reading A leitura realizada pelo nó sensor.
-     */
-    void schedule(const sensor::Reading &reading);
+    StaggeredProtocol(ReadingGenerator generator, lora::IAsyncRadio &phys, PersistentState &state);
 
 private:
     /**
@@ -126,6 +122,8 @@ private:
     lora::IAsyncRadio &m_Phys;
 
     PersistentState &m_State;
+
+    ReadingGenerator m_Generator;
 
     lora::Parameters m_Params;
 

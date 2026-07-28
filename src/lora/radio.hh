@@ -1,6 +1,7 @@
 #pragma once
 #include <etl/tuple.h>
 #include <etl/utility.h>
+#include <etl/algorithm.h>
 #include <stdlib.h>
 
 #include "port/port.hh"

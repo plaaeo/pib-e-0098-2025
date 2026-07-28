@@ -9,9 +9,13 @@
 #include "lora/radios/radiolib.hh"
 #include "port/port.hh"
 
+#include "net/clock.hh"
+#include "net/types.hh"
+#include "net/packets.hh"
+
 constexpr auto TAG = "sens";
 
-#ifndef GATEWAY
+#ifdef IS_SENSOR_NODE
 #    include <Adafruit_ADS1X15.h>
 #    include "lora/experimental.hh"
 
@@ -57,9 +61,8 @@ RTC_DATA_ATTR static struct
     /**
      * @brief Produz uma leitura atual de sensores a partir de uma interface de
      * leitura analógica.
-     * @todo Implementar armazenamento de tempo.
      */
-    sensor::Reading measure(sensor::AnalogInterface &iface) const noexcept
+    sensor::Reading measure(uint32_t time, sensor::AnalogInterface &iface) const noexcept
     {
         // Medir e calcular temperatura em graus celsius
         auto curTemperature =
@@ -73,7 +76,7 @@ RTC_DATA_ATTR static struct
         auto curPh = ph.convert(iface.measure_volts(ADS_CHANNEL_PH));
 
         return (sensor::Reading){
-            .time = 123456,
+            .time = time,
             .temperature = curTemperature,
             .tds = curTds,
             .ph = curPh,
@@ -91,7 +94,7 @@ RTC_DATA_ATTR lora::PersistentState g_State = {
     },
     .rt_state =
         {
-            .fsm = lora::StaggeredFSM::INITIALIZED,
+            .fsm = lora::StaggeredFSM::RECEIVING_BROADCASTS,
             .expected_slot_wakeup_time = 0,
 
             //< Aproximadamente o tempo de inicialização do ESP32-S3 durante
@@ -169,7 +172,12 @@ void task_sensor()
     static lora::RadioLibPhy s_Phy(s_LoraPhy);
 
     //< Interface para envio de leituras de sensor.
-    static lora::StaggeredProtocol s_Proto(s_Phy, g_State);
+    static lora::StaggeredProtocol s_Proto([](const net::Clock& clock) {
+        return g_Sensors.measure(
+            clock.get_time_us() / 1000000U,
+            g_ADC
+        );
+    }, s_Phy, g_State);
 
     // Tentar inicializar I2C do ADS1115
     if (!Wire.begin(ADS1115_SDA, ADS1115_SCL)) {
@@ -206,7 +214,7 @@ struct Gateway : public port::EventTask
     constexpr static port::event_bits EVENT_BROADCAST = 1 << 0;
     constexpr static port::event_bits EVENT_IRQ = 1 << 1;
 
-    static net::SlotTimingInfo s_TimingInfo = {
+    constexpr static net::SlotTimingInfo s_TimingInfo = {
         .tdm_subslot_guard_symbols = 0x02,
         .tdm_subslot_mtu_bytes = 0x40,
         .tdm_subslot_count = 0x02,
@@ -214,9 +222,9 @@ struct Gateway : public port::EventTask
         .tdm_frame_count = 0x7f,
     };
 
-    static lora::IAsyncRadio &m_Phys;
-    port::Timer               m_BroadcastTimer;
-    net::Clock                m_NetTime;
+    lora::IAsyncRadio &m_Phys;
+    port::Timer        m_BroadcastTimer;
+    net::Clock         m_NetTime;
 
     Gateway(lora::IAsyncRadio &phy)
         : port::EventTask(0)
@@ -238,7 +246,7 @@ struct Gateway : public port::EventTask
         m_BroadcastTimer.start_once(30e+6);
     };
 
-    event_bits on_event(event_bits ev) override
+    port::event_bits on_event(port::event_bits ev) override
     {
         lora::IrqFlags                     flags;
         lora::StatusCode                   status;
@@ -248,6 +256,7 @@ struct Gateway : public port::EventTask
 
         // Ao receber um IRQ do radio
         if (ev & EVENT_IRQ) {
+            ev &= ~EVENT_IRQ;
             etl::tie(status, flags) = m_Phys.get_flags();
             LORA_ASSERT(status);
 
@@ -273,6 +282,8 @@ struct Gateway : public port::EventTask
 
             // Após transmitir um broadcast
             if (flags & lora::IrqFlags::IRQ_TX_DONE) {
+                ev &= ~EVENT_BROADCAST;
+
                 // Definir o tempo atual como tempo de início da rede
                 m_NetTime.synchronize(0, port::get_monotonic_time());
 
@@ -298,7 +309,7 @@ struct Gateway : public port::EventTask
         }
 
         // Enviar broadcast caso seja hora
-        if (ev & EVENT_BROADCAST) {
+        if (ev & EVENT_BROADCAST) {            
             net::Broadcast broadcast{
                 .reference_time_us = 0,
                 .id = net::gateway_node.id,
@@ -312,7 +323,7 @@ struct Gateway : public port::EventTask
 
             LORA_ASSERT(m_Phys.send({
                 .data = buffer,
-                .length = length,
+                .length = (lora::packet_length) length,
             }));
         }
 
@@ -380,5 +391,10 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(esp_pm_configure(&pm_config));
 
     esp_task_wdt_init(30, true);
+
+#ifdef IS_SENSOR_NODE
     task_sensor();
+#else
+    task_gateway();
+#endif
 };
