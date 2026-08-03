@@ -1,10 +1,6 @@
 #include "lora/experimental.hh"
 #include "port/port.hh"
 
-#define TRICKLE_REDUNDANCY_CONSTANT  2
-#define TRICKLE_MIN_INTERVAL_PACKETS 2
-#define TRICKLE_MAX_DOUBLINGS        3
-
 constexpr static auto TAG = "proto.experimental";
 
 namespace lora {
@@ -14,7 +10,7 @@ constexpr port::event_bits EVENT_TIMER = (1U << 2);
 constexpr port::event_bits EVENT_TRICKLE = (1U << 3);
 
 StaggeredProtocol::StaggeredProtocol(
-    ReadingGenerator  generator,
+    ReadingGenerator   generator,
     lora::IAsyncRadio &phys,
     PersistentState   &state
 )
@@ -22,7 +18,9 @@ StaggeredProtocol::StaggeredProtocol(
     , m_Phys(phys)
     , m_State(state)
     , m_Generator(generator)
-    , m_Params(net::gateway_node.calculate_personal_parameters())
+    , m_Params(
+          net::gateway_node.calculate_personal_parameters(net::INIT_SYNC_WORD)
+      )
     , m_MonoTimeAtISR_us(0)
     , m_TimeoutTimer(port::make_event_isr<EVENT_TIMER>(*this))
     , m_Trickle(port::make_event_isr<EVENT_TRICKLE>(*this), state.trickle)
@@ -77,18 +75,6 @@ bool StaggeredProtocol::process_broadcast(const net::Broadcast &packet)
         );
     }
 
-    // Caso a distância do nó mais distante tenha mudado, há uma
-    // inconsistência.
-    if (packet.max_hops != net::UNKNOWN_MAX_HOPS &&
-        packet.max_hops > m_State.max_hops) {
-        PORT_LOGI(
-            TAG, "upgraded max_hops from %hhu -> %hhu", m_State.max_hops,
-            packet.max_hops
-        );
-        m_State.max_hops = packet.max_hops;
-        reportInconsistency = true;
-    }
-
     // Caso nosso rank tenha mudado, há uma inconsistência.
     if (m_State.rank == net::infinite_rank ||
         m_State.rank.hops > (packet.rank.hops + 1)) {
@@ -112,17 +98,37 @@ bool StaggeredProtocol::process_broadcast(const net::Broadcast &packet)
         m_State.has_children = true;
     }
 
+    // Calcular o valor máximo de `max_hops` possível atualmente
+    auto newMaxHops = etl::max(packet.max_hops, m_State.max_hops);
+    if (newMaxHops != net::UNKNOWN_MAX_HOPS) {
+        newMaxHops = etl::max(newMaxHops, packet.rank.hops);
+        newMaxHops = etl::max(newMaxHops, m_State.rank.hops);
+    }
+
+    // Caso a distância do nó mais distante tenha mudado, há uma
+    // inconsistência.
+    if (newMaxHops > m_State.max_hops) {
+        PORT_LOGI(
+            TAG, "upgraded max_hops from %hhu -> %hhu", m_State.max_hops,
+            newMaxHops
+        );
+        m_State.max_hops = newMaxHops;
+        reportInconsistency = true;
+    }
+
     // Salvar caso o nó escutado seja um potencial pai
-    if (m_State.rank.hops == packet.rank.hops + 1) {
-        m_State.candidate_parents.add_or_update(
-            net::ParentInfo{
-                net::NodeInfo{
-                    .id = packet.id,
-                    .rank = packet.rank,
-                },
-                .last_rssi = rssi,
-                .last_snr = snr,
-            }
+    if (m_State.rank.hops == (packet.rank.hops + 1)) {
+        net::ParentInfo info{};
+        info.node.id = packet.id;
+        info.node.rank = packet.rank;
+        info.last_rssi = rssi;
+        info.last_snr = snr;
+
+        m_State.candidate_parents.add_or_update(etl::move(info));
+
+        PORT_LOGI(
+            TAG, "inserted potential parent (id %hhu; parents=%zu)", packet.id,
+            m_State.candidate_parents.candidate_parents.size()
         );
     }
 
@@ -171,10 +177,10 @@ void StaggeredProtocol::handle_broadcast_recv(lora::IrqFlags flags)
 
     // Iniciar o trickle caso ele ainda não esteja iniciado.
     m_Trickle.try_begin(
-        TRICKLE_REDUNDANCY_CONSTANT,
-        TRICKLE_MIN_INTERVAL_PACKETS *
+        m_State.slot_info.trickle_redundancy_constant,
+        m_State.slot_info.trickle_min_interval_packets *
             m_Params.calculate_time_on_air(net::Broadcast::BROADCAST_MAX_SIZE),
-        TRICKLE_MAX_DOUBLINGS
+        m_State.slot_info.trickle_max_doublings
     );
 }
 
@@ -284,9 +290,9 @@ void StaggeredProtocol::on_state_enter()
         m_TimeoutTimer.start_once(m_State.calculate_slot_duration());
 
         // Configurar parâmetros de comunicação direta
-        LORA_ASSERT(
-            m_Phys.set_parameters(m_State.calculate_personal_parameters())
-        );
+        LORA_ASSERT(m_Phys.set_parameters(
+            m_State.calculate_personal_parameters(net::EXEC_SYNC_WORD)
+        ));
 
         // Iniciar recepção sem timeout
         LORA_ASSERT(m_Phys.recv({
@@ -296,7 +302,10 @@ void StaggeredProtocol::on_state_enter()
             .continuous = true,
         }));
 
-        PORT_LOGI(TAG, "receiving readings from children");
+        PORT_LOGI(
+            TAG, "receiving readings from children (%lluus)",
+            m_State.net_time.get_time_us()
+        );
         return;
     }
 
@@ -306,11 +315,19 @@ void StaggeredProtocol::on_state_enter()
         // Definir timeout para inciar a transmissão
         m_TimeoutTimer.start_once(m_State.calculate_tx_wait_time());
 
-        PORT_LOGI(TAG, "waiting for my transmission slot");
+        PORT_LOGI(
+            TAG, "waiting for my transmission slot (%lluus)",
+            m_State.net_time.get_time_us()
+        );
         return;
     }
 
     case StaggeredFSM::TRANSMITTING_TO_PARENT: {
+        PORT_LOGI(
+            TAG, "transmitting to parent (%lluus)",
+            m_State.net_time.get_time_us()
+        );
+
         // Inserir a leitura deste nó em m_LastReceivedReadings
         if (!m_LastReceivedReadings.full()) {
             auto reading = (m_Generator)(m_State.net_time);
@@ -324,13 +341,15 @@ void StaggeredProtocol::on_state_enter()
 
         PORT_LOGI(TAG, " -- readings (%hhu) --", m_State.id);
         for (auto &x : m_LastReceivedReadings) {
+            auto r = x.reading.decompress();
             PORT_LOGI(
-                TAG, "<%hhu> %hu degC, %hu ppm, %hu pH at %u seconds", x.id,
-                x.reading.temperature, x.reading.tds, x.reading.ph,
-                x.reading.time
+                TAG, "<%hhu> %f degC, %f ppm, %f pH at %u seconds", x.id,
+                r.temperature, r.tds, r.ph, r.time
             );
         }
-        PORT_LOGI(TAG, " -- readings --");
+        PORT_LOGI(
+            TAG, " -- readings (%lluus) -- ", m_State.net_time.get_time_us()
+        );
 
         uint8_t buffer[UINT8_MAX];
 
@@ -338,10 +357,16 @@ void StaggeredProtocol::on_state_enter()
         auto length =
             net::encode_readings(m_LastReceivedReadings, buffer, UINT8_MAX);
 
+        // Caso não haja nenhum `candidate_parent` (nunca deve ocorrer), usar o
+        // gateway como fallback
+        auto parentNode =
+            m_State.candidate_parents.candidate_parents.empty()
+                ? net::gateway_node
+                : m_State.candidate_parents.candidate_parents.front().node;
+
         // Configurar parâmetros de comunicação direta
         LORA_ASSERT(m_Phys.set_parameters(
-            m_State.candidate_parents.candidate_parents.front()
-                .calculate_personal_parameters()
+            parentNode.calculate_personal_parameters(net::EXEC_SYNC_WORD)
         ));
 
         assert(length > 0);
@@ -428,9 +453,10 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
                     TAG, "suppressed broadcast due to channel occupation"
                 );
             }
+
             // Caso não estejamos no tempo máximo do trickle, sempre devemos
             // transmitir
-            else if (!m_State.trickle.is_capped())
+            if (!m_State.trickle.is_capped())
                 return StaggeredFSM::SENDING_BROADCAST;
 
             // Decidir se a rede está estável ou não
@@ -520,8 +546,10 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
             events &= ~EVENT_TIMER;
 
             // Caso esse tenha sido o último frame, a rede deve resetar.
-            if (m_State.slot_info.tdm_frame_count == 0)
+            if (m_State.slot_info.tdm_frame_count == 0) {
+                m_State.reset();
                 return StaggeredFSM::RECEIVING_BROADCASTS;
+            }
 
             m_State.slot_info.tdm_frame_count--;
             return StaggeredFSM::TRANSMITTING_TO_PARENT;
@@ -579,12 +607,13 @@ void StaggeredProtocol::on_start()
 
         // Caso o sono não tenha durado o suficiente, dormir novamente até o
         // slot de recepção.
-        if (now < m_State.rt_state.expected_slot_wakeup_time +
-                      m_State.rt_state.slot_timer_calibration) {
-            port::enter_deep_sleep(
-                m_State.rt_state.expected_slot_wakeup_time +
-                m_State.rt_state.slot_timer_calibration - now
-            );
+        if (now < (m_State.rt_state.expected_slot_wakeup_time +
+                   m_State.rt_state.slot_timer_calibration)) {
+            auto amount = m_State.rt_state.expected_slot_wakeup_time +
+                          m_State.rt_state.slot_timer_calibration - now;
+
+            PORT_LOGI(TAG, "underslept; sleeping again for %lluus", amount);
+            port::enter_deep_sleep(amount);
         }
 
         m_State.rt_state.fsm = StaggeredFSM::RECEIVING_FROM_CHILDREN;

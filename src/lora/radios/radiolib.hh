@@ -72,6 +72,11 @@ public:
         status = convert_radiolib_status(
             m_Phy.setPreambleLength(params.preamble_length)
         );
+        if (status != lora::StatusCode::ok)
+            return status;
+
+        auto sw = params.sync_word;
+        status = convert_radiolib_status(m_Phy.setSyncWord(&sw, 1));
 
         /// @todo Implicit header
         return status;

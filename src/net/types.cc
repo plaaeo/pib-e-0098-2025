@@ -16,8 +16,11 @@ void CandidateParents::add_or_update(ParentInfo &&info)
     // Buscar potencial pai no vetor `candidate_parents`
     for (size_t i = 0; i < candidate_parents.size(); i++) {
         // Atualizar caso tenhamos encontrado o pai
-        if (candidate_parents[i].id == info.id) {
-            candidate_parents.assign(i, info);
+        if (candidate_parents[i].node.id == info.node.id) {
+            PORT_LOGI(
+                TAG, "updating existing parent record for %hhu", info.node.id
+            );
+            candidate_parents[i] = info;
             return;
         }
     }
@@ -38,16 +41,18 @@ void CandidateParents::add_or_update(ParentInfo &&info)
 
         // Descartar pai novo
         if (worstIndex == SIZE_MAX) {
-            PORT_LOGI(TAG, "discarding low-quality parent %hhu (new)", info.id);
+            PORT_LOGI(
+                TAG, "discarding low-quality parent %hhu (new)", info.node.id
+            );
             return;
         }
 
         // Descartar pai antigo
         PORT_LOGI(
             TAG, "discarding low-quality parent %hhu for %hhu",
-            candidate_parents[worstIndex].id, info.id
+            candidate_parents[worstIndex].node.id, info.node.id
         );
-        candidate_parents.assign(worstIndex, info);
+        candidate_parents[worstIndex] = info;
     } else {
         candidate_parents.push_back(info);
     }
@@ -68,6 +73,6 @@ etl::optional<uint8_t> CandidateParents::sort_by_objective()
         candidate_parents.begin(), candidate_parents.end(), compare_parent_info
     );
 
-    return etl::optional<uint8_t>{ candidate_parents[0].id };
+    return etl::optional<uint8_t>{candidate_parents[0].node.id};
 };
 }  // namespace net

@@ -80,7 +80,7 @@ struct CompressedReading
     {
         return (CompressedReading){
             .time = reading.time,
-            .temperature = META_TEMPERATURE.compress(reading.tds),
+            .temperature = META_TEMPERATURE.compress(reading.temperature),
             .tds = META_TDS.compress(reading.tds),
             .ph = META_PH.compress(reading.ph),
         };
@@ -94,7 +94,7 @@ struct CompressedReading
     {
         return (sensor::Reading){
             .time = time,
-            .temperature = META_TEMPERATURE.decompress(tds),
+            .temperature = META_TEMPERATURE.decompress(temperature),
             .tds = META_TDS.decompress(tds),
             .ph = META_PH.decompress(ph),
         };

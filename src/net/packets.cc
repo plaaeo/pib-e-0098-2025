@@ -18,11 +18,14 @@ etl::optional<Broadcast> Broadcast::decode(uint8_t *buffer, size_t length)
     out.slot_info.tdm_subslot_count = buffer[8];
     out.slot_info.tdm_slot_count = buffer[9];
     out.slot_info.tdm_frame_count = buffer[10];
+    out.slot_info.trickle_redundancy_constant = buffer[11];
+    out.slot_info.trickle_min_interval_packets = buffer[12];
+    out.slot_info.trickle_max_doublings = buffer[13];
     out.max_hops = net::UNKNOWN_MAX_HOPS;
 
     // Decodificar `max_hops` caso presente
     if (length == BROADCAST_MAX_SIZE)
-        out.max_hops = buffer[11];
+        out.max_hops = buffer[14];
 
     return etl::optional<Broadcast>{out};
 };
@@ -43,10 +46,13 @@ size_t Broadcast::encode(uint8_t *buffer, size_t length) const
     buffer[8] = slot_info.tdm_subslot_count;
     buffer[9] = slot_info.tdm_slot_count;
     buffer[10] = slot_info.tdm_frame_count;
+    buffer[11] = slot_info.trickle_redundancy_constant;
+    buffer[12] = slot_info.trickle_min_interval_packets;
+    buffer[13] = slot_info.trickle_max_doublings;
 
     // Codificar `max_hops` caso presente
     if (max_hops != net::UNKNOWN_MAX_HOPS) {
-        buffer[11] = max_hops;
+        buffer[14] = max_hops;
         return BROADCAST_MAX_SIZE;
     }
 
@@ -85,7 +91,7 @@ size_t encode_readings(
     output[i++] = static_cast<uint8_t>(base.reading.tds);
     output[i++] = static_cast<uint8_t>(base.reading.ph);
 
-    for (auto it = readings.begin() + 1; it != readings.end(); i += 1) {
+    for (auto it = readings.begin() + 1; it != readings.end(); it += 1) {
         // Verificatr se terá overflow no buffer
         if ((out_capacity - i) < EXPECTED_SMALL_CR_SIZE)
             break;
@@ -101,10 +107,10 @@ size_t encode_readings(
 
         // Codificar forma padrão da OwnedReading
         output[i++] = static_cast<uint8_t>(timediff);
-        output[i++] = base.id;
-        output[i++] = static_cast<uint8_t>(base.reading.temperature);
-        output[i++] = static_cast<uint8_t>(base.reading.tds);
-        output[i++] = static_cast<uint8_t>(base.reading.ph);
+        output[i++] = it->id;
+        output[i++] = static_cast<uint8_t>(it->reading.temperature);
+        output[i++] = static_cast<uint8_t>(it->reading.tds);
+        output[i++] = static_cast<uint8_t>(it->reading.ph);
     }
 
     return i;
@@ -147,7 +153,7 @@ size_t decode_readings(
     in_length -= EXPECTED_CR_SIZE;
 
     size_t it, smallCRs = in_length / EXPECTED_SMALL_CR_SIZE;
-    for (it = 0; it < smallCRs && !readings.full(); i++) {
+    for (it = 0; it < smallCRs && !readings.full(); it++) {
         OwnedReading item = {};
 
         // Decodificar forma minimizada da OwnedReading

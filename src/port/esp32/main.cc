@@ -10,8 +10,8 @@
 #include "port/port.hh"
 
 #include "net/clock.hh"
-#include "net/types.hh"
 #include "net/packets.hh"
+#include "net/types.hh"
 
 constexpr auto TAG = "sens";
 
@@ -28,11 +28,11 @@ RTC_DATA_ATTR static struct
 {
     enum : uint32_t
     {
-        //< Canal do ADS conectado ao sensor de temperatura (A0).
-        ADS_CHANNEL_TEMPERATURE = 0,
+        //< Canal do ADS conectado ao sensor de temperatura (A1).
+        ADS_CHANNEL_TEMPERATURE = 1,
 
-        //< Canal do ADS conectado ao sensor de pH (A1).
-        ADS_CHANNEL_PH = 1,
+        //< Canal do ADS conectado ao sensor de pH (A0).
+        ADS_CHANNEL_PH = 0,
 
         //< Canal do ADS conectado ao sensor de TDS (A2).
         ADS_CHANNEL_TDS = 2,
@@ -62,7 +62,8 @@ RTC_DATA_ATTR static struct
      * @brief Produz uma leitura atual de sensores a partir de uma interface de
      * leitura analógica.
      */
-    sensor::Reading measure(uint32_t time, sensor::AnalogInterface &iface) const noexcept
+    sensor::Reading
+    measure(uint32_t time, sensor::AnalogInterface &iface) const noexcept
     {
         // Medir e calcular temperatura em graus celsius
         auto curTemperature =
@@ -87,27 +88,14 @@ RTC_DATA_ATTR static struct
 //< Interface analógica para o ADS1115.
 sensor::ADS1X15Interface g_ADC;
 
-RTC_DATA_ATTR lora::PersistentState g_State = {
-    net::NodeInfo{
-        .id = UINT8_MAX,
-        .rank = net::infinite_rank,
-    },
-    .rt_state =
-        {
-            .fsm = lora::StaggeredFSM::RECEIVING_BROADCASTS,
-            .expected_slot_wakeup_time = 0,
+// HACK: Força o storage de `g_State` a não ser inicializado pelo construtor
+// padrão. Permite persistir `etl::vector`s entre deep sleeps (o que é válido,
+// visto que usam storage estático).
+PORT_PERSIST_SLEEP alignas(
+    lora::PersistentState
+) uint8_t g_StateStorage[sizeof(lora::PersistentState)];
 
-            //< Aproximadamente o tempo de inicialização do ESP32-S3 durante
-            // deep sleep, descoberto experimentalmente.
-            .slot_timer_calibration = -1000000,
-        },
-    .trickle = {},
-    .net_time = {},
-    .slot_info = {},
-    .max_hops = net::UNKNOWN_MAX_HOPS,
-    .has_children = false,
-    .candidate_parents = {},
-};
+auto &g_State = *reinterpret_cast<lora::PersistentState *>(g_StateStorage);
 
 #    ifdef HEARTBEAT_PIN
 
@@ -171,14 +159,6 @@ void task_sensor()
     static LORA_RADIO s_LoraPhy = LORA_RADIO(&s_Module);
     static lora::RadioLibPhy s_Phy(s_LoraPhy);
 
-    //< Interface para envio de leituras de sensor.
-    static lora::StaggeredProtocol s_Proto([](const net::Clock& clock) {
-        return g_Sensors.measure(
-            clock.get_time_us() / 1000000U,
-            g_ADC
-        );
-    }, s_Phy, g_State);
-
     // Tentar inicializar I2C do ADS1115
     if (!Wire.begin(ADS1115_SDA, ADS1115_SCL)) {
         PORT_LOGW(
@@ -193,6 +173,54 @@ void task_sensor()
             TAG, "falha ao inicializar o ADS1X15, leituras não serão realizadas"
         );
     }
+
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        new (&g_State) lora::PersistentState{
+            net::NodeInfo{
+                .id = 2,
+                .rank = net::infinite_rank,
+            },
+            .rt_state =
+                {
+                    .fsm = lora::StaggeredFSM::RECEIVING_BROADCASTS,
+                    .expected_slot_wakeup_time = 0,
+
+                    //< Aproximadamente o tempo de inicialização do ESP32-S3
+                    // durante
+                    // deep sleep, descoberto experimentalmente.
+                    .slot_timer_calibration = -1000000,
+                },
+            .trickle = {},
+            .net_time = {},
+            .slot_info = {},
+            .max_hops = net::UNKNOWN_MAX_HOPS,
+            .has_children = false,
+            .candidate_parents = {},
+        };
+        PORT_LOGI(TAG, "nó sensor %hhu inicializado", g_State.id);
+    } else {
+        PORT_LOGI(
+            TAG,
+            "nó sensor %hhu (%hhu.%hhu) acordando (fsm=%d, "
+            "expected_slot_wakeup_time=%llu)",
+            g_State.id, g_State.rank.hops, g_State.rank.tiredness,
+            (int)g_State.rt_state.fsm,
+            g_State.rt_state.expected_slot_wakeup_time
+        );
+    }
+
+    /// Realizar uma medida inicial
+    /// @todo realizar as medidas em uma outra task assincronamente
+    static auto s_Measure = g_Sensors.measure(0, g_ADC);
+
+    //< Interface para envio de leituras de sensor.
+    static lora::StaggeredProtocol s_Proto(
+        [](const net::Clock &clock) {
+            s_Measure.time = clock.get_time_us() / 1000000U;
+            return s_Measure;
+        },
+        s_Phy, g_State
+    );
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     s_LoraPhy.begin(915.0f);
@@ -218,8 +246,11 @@ struct Gateway : public port::EventTask
         .tdm_subslot_guard_symbols = 0x02,
         .tdm_subslot_mtu_bytes = 0x40,
         .tdm_subslot_count = 0x02,
-        .tdm_slot_count = 0x20,
+        .tdm_slot_count = 0x30,
         .tdm_frame_count = 0x7f,
+        .trickle_redundancy_constant = 2,
+        .trickle_min_interval_packets = 4,
+        .trickle_max_doublings = 5,
     };
 
     lora::IAsyncRadio &m_Phys;
@@ -234,13 +265,22 @@ struct Gateway : public port::EventTask
 
     void on_start() override
     {
+        PORT_LOGI(
+            TAG,
+            "-- gateway started --\n"
+            "cycle length: %lluus\n"
+            "frame period: %lluus\n"
+            "slot duration: %lluus\n"
+            "subslot duration: %lluus\n"
+            "-- gateway started --\n",
+            s_TimingInfo.calculate_network_cycle_duration(),
+            s_TimingInfo.calculate_frame_duration(),
+            s_TimingInfo.calculate_slot_duration(),
+            s_TimingInfo.calculate_subslot_duration()
+        );
+
         // Configurar ISR
         m_Phys.set_isr(port::make_event_isr<EVENT_IRQ>(*this));
-
-        // Definir parâmetros comuns
-        LORA_ASSERT(m_Phys.set_parameters(
-            net::gateway_node.calculate_personal_parameters()
-        ));
 
         // Aguardar 30 segundos para o broadcast inicial da rede
         m_BroadcastTimer.start_once(30e+6);
@@ -264,7 +304,12 @@ struct Gateway : public port::EventTask
             if (flags & lora::IrqFlags::IRQ_RX_DONE) {
                 etl::tie(status, length) = m_Phys.get_message_length();
                 LORA_ASSERT(status);
-                LORA_ASSERT(m_Phys.read_message(buffer, length));
+
+                status = m_Phys.read_message(buffer, length);
+                if (status != lora::StatusCode::ok) {
+                    PORT_LOGW(TAG, "falha ao ler pacote recebido");
+                    return ev;
+                }
 
                 /// @todo enviar para o servidor
                 net::decode_readings(readings, buffer, length);
@@ -282,21 +327,23 @@ struct Gateway : public port::EventTask
 
             // Após transmitir um broadcast
             if (flags & lora::IrqFlags::IRQ_TX_DONE) {
-                ev &= ~EVENT_BROADCAST;
-
                 // Definir o tempo atual como tempo de início da rede
                 m_NetTime.synchronize(0, port::get_monotonic_time());
 
-                // Reiniciar a rede (enviar outro broadcast) no próximo ciclo +
-                // 30 segundos
-                m_BroadcastTimer.start_once(
-                    s_TimingInfo.calculate_network_cycle_duration() + 30e+6
-                );
+                // Enviar outro broadcast daqui a 30 segundos
+                m_BroadcastTimer.start_once(30e+6);
 
                 PORT_LOGI(
                     TAG, "sent initial network broadcast at %lluus",
                     port::get_rtc_time()
                 );
+
+                // Definir parâmetros de execução
+                LORA_ASSERT(m_Phys.set_parameters(
+                    net::gateway_node.calculate_personal_parameters(
+                        net::EXEC_SYNC_WORD
+                    )
+                ));
 
                 // Iniciar recepção contínua de pacotes de nós filhos
                 LORA_ASSERT(m_Phys.recv({
@@ -309,7 +356,20 @@ struct Gateway : public port::EventTask
         }
 
         // Enviar broadcast caso seja hora
-        if (ev & EVENT_BROADCAST) {            
+        if (ev & EVENT_BROADCAST) {
+            ev &= ~EVENT_BROADCAST;
+
+            // Verificar se o rádio está ocupado
+            auto [status, flags] = m_Phys.get_flags();
+            if (status == lora::StatusCode::ok &&
+                (flags & lora::RECEIVING_FLAGS)) {
+                // Tentar denovo daqui a 5 segundos
+                m_BroadcastTimer.start_once(5e+6);
+
+                PORT_LOGW(TAG, "radio busy; delayed broadcast for 5 seconds");
+                return ev;
+            }
+
             net::Broadcast broadcast{
                 .reference_time_us = 0,
                 .id = net::gateway_node.id,
@@ -321,9 +381,17 @@ struct Gateway : public port::EventTask
             auto length = broadcast.encode(buffer, UINT8_MAX);
             assert(length > 0);
 
+            // Definir parâmetros comuns de inicialização
+            LORA_ASSERT(m_Phys.set_parameters(
+                net::gateway_node.calculate_personal_parameters(
+                    net::INIT_SYNC_WORD
+                )
+            ));
+
+            // Enviar broadcast
             LORA_ASSERT(m_Phys.send({
                 .data = buffer,
-                .length = (lora::packet_length) length,
+                .length = (lora::packet_length)length,
             }));
         }
 

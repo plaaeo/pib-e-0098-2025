@@ -83,15 +83,17 @@ constexpr size_t   MAX_CANDIDATE_PARENTS = 16;
 constexpr node_id  GATEWAY_ID = 0;
 constexpr uint8_t  UNKNOWN_MAX_HOPS = 0;
 constexpr Rank     infinite_rank = Rank::from(0xFF);
+constexpr uint8_t  INIT_SYNC_WORD = 0x77;
+constexpr uint8_t  EXEC_SYNC_WORD = 0x66;
 
 constexpr lora::Parameters BASE_PARAMETERS = {
     .freq_hz = PARAM_FREQUENCY_MIN,
     .bandwidth_hz = PARAM_BANDWIDTH,
     .preamble_length = 12,
-    .power_db = 5,
-    .spreading_factor = 12,
+    .power_db = 2,
+    .spreading_factor = 10,
     .coding_rate = 5,
-    .sync_word = 0x77,
+    .sync_word = INIT_SYNC_WORD,
     .implicit_header = false,
 };
 
@@ -111,9 +113,12 @@ struct NodeInfo
      * @brief Calcula os parâmetros LoRa usados para se comunicar com um nó
      * deste rank.
      */
-    inline lora::Parameters calculate_personal_parameters() const noexcept
+    inline lora::Parameters calculate_personal_parameters(
+        uint8_t syncWord
+    ) const noexcept
     {
         lora::Parameters parameters = BASE_PARAMETERS;
+        parameters.sync_word = syncWord;
 
         // Adicionar offset específico de bandwidth baseado no ID
         uint32_t freq_offset_hz = id * (PARAM_BANDWIDTH + PARAM_CHANNEL_GAP);
@@ -137,10 +142,11 @@ constexpr NodeInfo gateway_node = {
  * @brief Representa as informações de um vizinho potencialmente pai
  * do nó. Atualizado apenas durante a fase de inicialização.
  */
-struct ParentInfo : public NodeInfo
+struct ParentInfo
 {
-    float last_rssi;
-    float last_snr;
+    NodeInfo node;
+    float    last_rssi;
+    float    last_snr;
 
     inline uint32_t score() const
     {
@@ -150,7 +156,7 @@ struct ParentInfo : public NodeInfo
          * esteja um pouco indisposto a ser pai (tiredness = 0b01), porém possui
          * um RSSI muito melhor do que outros, pode ainda ser selecionado.
          */
-        uint32_t s = static_cast<uint32_t>(rank.tiredness ^ 0b11) << 15;
+        uint32_t s = static_cast<uint32_t>(node.rank.tiredness ^ 0b11) << 15;
 
         // Score do RSSI (-127dBm -> 0; 0dBm -> 255)
         int32_t rssiScore = 255 + static_cast<int32_t>(last_rssi * 2);
@@ -200,6 +206,9 @@ struct SlotTimingInfo
     uint8_t tdm_subslot_count;
     uint8_t tdm_slot_count;
     uint8_t tdm_frame_count;
+    uint8_t trickle_redundancy_constant;
+    uint8_t trickle_min_interval_packets;
+    uint8_t trickle_max_doublings;
 
     /**
      * @brief Calcula a duração de um subslot completo da rede. Um subslot
@@ -285,6 +294,20 @@ struct State : public NodeInfo
      * @brief Mantém e gerencia uma lista de possíveis pais.
      */
     net::CandidateParents candidate_parents;
+
+    /**
+     * @brief Reseta o estado da rede para o estado inicial.
+     */
+    constexpr void reset()
+    {
+        rank = net::infinite_rank;
+        trickle = {};
+        net_time = {};
+        slot_info = {};
+        max_hops = net::UNKNOWN_MAX_HOPS;
+        has_children = false;
+        candidate_parents.clear();
+    }
 
     /**
      * @brief Mesmo que `slot_info.calculate_subslot_duration()`.

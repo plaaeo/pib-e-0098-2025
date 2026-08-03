@@ -6,7 +6,7 @@
 #define PORT_ISR_SAFE IRAM_ATTR
 
 //< Atributo. Define que um dado irá persistir entre ciclos de sono do MCU.
-#define PORT_PERSIST_SLEEP RTC_DATA_ATTR
+#define PORT_PERSIST_SLEEP RTC_NOINIT_ATTR
 
 #define PORT_LOGI ESP_LOGI
 #define PORT_LOGE ESP_LOGE
