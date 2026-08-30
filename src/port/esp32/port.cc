@@ -1,5 +1,6 @@
 #include "port/port.hh"
 
+#include <driver/gpio.h>
 #include <esp_random.h>
 #include <esp_sleep.h>
 #include <esp_timer.h>
@@ -21,6 +22,27 @@ namespace port {
 #if PORT_HAS_ISR_DISPATCH
 static bool g_IsInISRTimer = false;
 #endif
+
+//< Controla a LED de debug
+void debug_led(bool on)
+{
+    static bool s_Configured = false;
+    if (!s_Configured) {
+        gpio_config_t cfg{
+            .pin_bit_mask = 1ULL << STATUS_LED,
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+
+        s_Configured = gpio_config(&cfg) == ESP_OK;
+    }
+
+    gpio_hold_dis(STATUS_LED);
+    gpio_set_level(STATUS_LED, on ? 1 : 0);
+    gpio_hold_en(STATUS_LED);
+};
 
 //< Retorna um número pseudo-aleatório
 uint32_t random()

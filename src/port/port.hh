@@ -96,6 +96,14 @@ void unschedule(class EventTask &task) noexcept;
 void enter_deep_sleep(port::time_us duration) noexcept;
 
 /**
+ * @brief Controla uma LED de debug, ou alguma outra forma de visualização de
+ * estado do dispositivo.
+ * @param on `true` para ligar a LED, `false` para desligar.
+ * @note Definido pela plataforma.
+ */
+void debug_led(bool on);
+
+/**
  * @brief Usado como uma abstração para a implementação de tasks possívelmente
  * concorrentes, dependendo da plataforma.
  */

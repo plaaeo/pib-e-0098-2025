@@ -432,7 +432,10 @@ StaggeredFSM StaggeredProtocol::on_state_event(port::event_bits &events)
         // Uma mensagem pode ter sido recebida.
         if (events & EVENT_IRQ) {
             events &= ~EVENT_IRQ;
+
+            port::debug_led(true);
             handle_broadcast_recv(flags);
+            port::debug_led(false);
         }
 
         // Caso o Trickle Timer tenha finalizado, talvez seja possível

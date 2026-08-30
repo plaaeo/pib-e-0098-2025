@@ -288,11 +288,10 @@ struct Gateway : public port::EventTask
 
     port::event_bits on_event(port::event_bits ev) override
     {
-        lora::IrqFlags                     flags;
-        lora::StatusCode                   status;
-        lora::packet_length                length;
-        uint8_t                            buffer[UINT8_MAX];
-        etl::vector<net::OwnedReading, 32> readings;
+        lora::IrqFlags      flags;
+        lora::StatusCode    status;
+        lora::packet_length length;
+        uint8_t             buffer[UINT8_MAX];
 
         // Ao receber um IRQ do radio
         if (ev & EVENT_IRQ) {
@@ -302,6 +301,9 @@ struct Gateway : public port::EventTask
 
             // Ler pacote se algum foi recebido
             if (flags & lora::IrqFlags::IRQ_RX_DONE) {
+                LORA_ASSERT(m_Phys.clear_flags(lora::ALL_RX_FLAGS));
+
+                etl::vector<net::OwnedReading, 32> readings;
                 etl::tie(status, length) = m_Phys.get_message_length();
                 LORA_ASSERT(status);
 
@@ -327,6 +329,9 @@ struct Gateway : public port::EventTask
 
             // Após transmitir um broadcast
             if (flags & lora::IrqFlags::IRQ_TX_DONE) {
+                port::debug_led(false);
+                LORA_ASSERT(m_Phys.clear_flags(lora::ALL_TX_FLAGS));
+
                 // Definir o tempo atual como tempo de início da rede
                 m_NetTime.synchronize(0, port::get_monotonic_time());
 
@@ -366,7 +371,17 @@ struct Gateway : public port::EventTask
                 // Tentar denovo daqui a 5 segundos
                 m_BroadcastTimer.start_once(5e+6);
 
-                PORT_LOGW(TAG, "radio busy; delayed broadcast for 5 seconds");
+                // Limpar flags que não forem RX_DONE pra não perdermos o
+                // próximo período e nem o próximo pacote recebido
+                LORA_ASSERT(
+                    m_Phys.clear_flags(lora::ALL_RX_FLAGS & ~lora::IRQ_RX_DONE)
+                );
+
+                PORT_LOGW(
+                    TAG,
+                    "radio busy; delayed broadcast for 5 seconds (flags=%u)",
+                    (uint32_t)flags
+                );
                 return ev;
             }
 
@@ -393,6 +408,8 @@ struct Gateway : public port::EventTask
                 .data = buffer,
                 .length = (lora::packet_length)length,
             }));
+
+            port::debug_led(true);
         }
 
         return ev;

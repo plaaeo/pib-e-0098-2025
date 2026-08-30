@@ -30,6 +30,7 @@ using packet_length = uint8_t;
 enum IrqFlags : uint32_t
 {
     /* clang-format off */
+    IRQ_NONE                = 0U,
     IRQ_TX_DONE             = 1U << 0,
     IRQ_RX_DONE             = 1U << 1,
     IRQ_PREAMBLE_DETECTED   = 1U << 2,
@@ -101,7 +102,7 @@ struct Parameters
     uint16_t preamble_length;
 
     /// @brief A potência de transmissão a usar no canal, em dB.
-    uint8_t power_db;
+    int8_t power_db;
 
     /// @brief O fator de espalhamento dos símbolos LoRa.
     uint8_t spreading_factor;
